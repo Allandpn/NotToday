@@ -37,6 +37,20 @@ class LogicTest {
     }
 
     @Test
+    fun chromeOptionsAndExtraStoresFollowTheSameRules() {
+        // YouTube restrito: 2 estrito, 0 desligado; descer afrouxa, subir endurece.
+        assertEquals(Change.LOOSEN, Gate.classify("chrome_youtube", "2", "1"))
+        assertEquals(Change.LOOSEN, Gate.classify("chrome_youtube", "1", "0"))
+        assertEquals(Change.TIGHTEN, Gate.classify("chrome_youtube", "0", "2"))
+        assertEquals(Change.LOOSEN, Gate.classify("chrome_doh_off", "true", "false"))
+        assertEquals(Change.LOOSEN, Gate.classify("chrome_safesearch", "true", "false"))
+        assertEquals(Change.TIGHTEN, Gate.classify("chrome_incognito_block", "false", "true"))
+        // Tirar uma loja da lista extra afrouxa; acrescentar endurece.
+        assertEquals(Change.LOOSEN, Gate.classify("store_extra", "a,b", "a"))
+        assertEquals(Change.TIGHTEN, Gate.classify("store_extra", "a", "a,b"))
+    }
+
+    @Test
     fun exemptingABrowserLoosens() {
         assertEquals(Change.LOOSEN, Gate.classify("browsers_exempt", "", "com.android.chrome"))
         assertEquals(Change.TIGHTEN, Gate.classify("browsers_exempt", "com.android.chrome", ""))

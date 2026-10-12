@@ -13,16 +13,22 @@ data class RestrictionSpec(
 
 object Catalog {
     val restrictions = listOf(
-        RestrictionSpec(UserManager.DISALLOW_CONFIG_TETHERING, "Bloquear hotspot/tethering", true),
-        RestrictionSpec(UserManager.DISALLOW_WIFI_TETHERING, "Bloquear hotspot Wi-Fi", true),
-        RestrictionSpec(UserManager.DISALLOW_WIFI_DIRECT, "Bloquear Wi-Fi Direct", true),
+        RestrictionSpec(UserManager.DISALLOW_CONFIG_TETHERING, "Bloquear hotspot/tethering", false),
+        RestrictionSpec(UserManager.DISALLOW_WIFI_TETHERING, "Bloquear hotspot Wi-Fi", false),
+        RestrictionSpec(UserManager.DISALLOW_WIFI_DIRECT, "Bloquear Wi-Fi Direct", false),
         RestrictionSpec(UserManager.DISALLOW_NETWORK_RESET, "Bloquear reset de rede", true),
         RestrictionSpec(
-            UserManager.DISALLOW_USB_FILE_TRANSFER, "Bloquear transferência de arquivos por USB", true,
+            UserManager.DISALLOW_USB_FILE_TRANSFER, "Bloquear transferência de arquivos por USB", false,
             "Não afeta o ADB. A janela de manutenção libera temporariamente.",
         ),
-        RestrictionSpec(UserManager.DISALLOW_UNINSTALL_APPS, "Bloquear desinstalar apps", true),
-        RestrictionSpec(UserManager.DISALLOW_APPS_CONTROL, "Bloquear forçar parada/limpar dados", true),
+        RestrictionSpec(
+            UserManager.DISALLOW_UNINSTALL_APPS, "Bloquear desinstalar qualquer app", false,
+            "O NotToday, o Tailscale e os \"apps protegidos\" já ficam sem desinstalar, parar nem limpar dados, com esta opção desligada.",
+        ),
+        RestrictionSpec(
+            UserManager.DISALLOW_APPS_CONTROL, "Bloquear forçar parada/limpar dados de qualquer app", false,
+            "Mesma observação: os apps essenciais já têm proteção própria.",
+        ),
         RestrictionSpec(UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES, "Bloquear fontes desconhecidas", true),
         RestrictionSpec(UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY, "Bloquear fontes desconhecidas (global)", true),
         RestrictionSpec(UserManager.DISALLOW_SAFE_BOOT, "Bloquear modo seguro", true),
@@ -35,7 +41,7 @@ object Catalog {
         ),
         RestrictionSpec(
             UserManager.DISALLOW_CONFIG_PRIVATE_DNS, "Bloquear trocar DNS privado", true,
-            "DNS privado fixo ignoraria o DNS do Tailscale/Pi-hole.",
+            "DNS privado fixo ignoraria o DNS do Tailscale (o servidor filtrante).",
         ),
         RestrictionSpec(UserManager.DISALLOW_CONFIG_VPN, "Bloquear VPN", true, "Impede também VPNs legítimas."),
         RestrictionSpec(
@@ -57,8 +63,8 @@ object Catalog {
         ),
         RestrictionSpec(UserManager.DISALLOW_USER_SWITCH, "Bloquear troca de usuário", false),
         RestrictionSpec(
-            UserManager.DISALLOW_FACTORY_RESET, "Bloquear reset de fábrica (Configurações)", false,
-            "Não impede reset pelo recovery. Se o PIN se perder, é a última saída.",
+            UserManager.DISALLOW_FACTORY_RESET, "Bloquear reset de fábrica (Configurações)", true,
+            "É o jeito mais rápido de apagar o NotToday. Não impede reset pelo recovery. Desligue se quiser ter essa saída se o PIN se perder.",
         ),
         RestrictionSpec(
             UserManager.DISALLOW_DEBUGGING_FEATURES, "Bloquear depuração USB/ADB (fecha o shell)", false,
@@ -67,9 +73,18 @@ object Catalog {
         ),
     )
 
-    /** Lojas alternativas e instaladores de pacote, suspensos pela opção "lojas". A Play Store fica liberada. */
+    /**
+     * Lojas alternativas e instaladores de pacote conhecidos, suspensos pela opção "lojas" (desligada por padrão: a
+     * regra de apps novos já cobre). A Play Store fica liberada. Cada um pode acrescentar os seus em "lojas extras".
+     */
     val storePackages = listOf(
-        "com.sec.android.app.samsungapps",
+        "com.sec.android.app.samsungapps", // Galaxy Store
+        "com.xiaomi.mipicks", // Xiaomi GetApps
+        "com.huawei.appmarket", // AppGallery
+        "com.amazon.venezia", // Amazon Appstore
+        "org.fdroid.fdroid", // F-Droid
+        "com.aurora.store",
+        "cm.aptoide.pt",
         "com.google.android.packageinstaller",
         "com.android.packageinstaller",
         "com.samsung.android.packageinstaller",
@@ -88,7 +103,7 @@ class Config(context: Context) {
 
     /** Suspende lojas alternativas e instaladores de pacote (a Play Store não entra). */
     var suspendBlocked: Boolean
-        get() = prefs.getBoolean("suspend_blocked", true)
+        get() = prefs.getBoolean("suspend_blocked", false)
         set(v) = prefs.edit().putBoolean("suspend_blocked", v).apply()
 
     /** Liga o filtro: Tailscale como VPN sempre ativa + apps marcados só funcionam com o filtro confirmado. */
@@ -150,10 +165,31 @@ class Config(context: Context) {
         get() = csv(prefs.getString("protected_pkgs", null))
         set(v) = prefs.edit().putString("protected_pkgs", v.joinToString(",")).apply()
 
-    /** Política gerenciada do Chrome: SafeSearch forçado, YouTube restrito, sem anônima. */
-    var chromePolicy: Boolean
-        get() = prefs.getBoolean("chrome_policy", true)
-        set(v) = prefs.edit().putBoolean("chrome_policy", v).apply()
+    /** Pacotes de lojas além da lista conhecida (suspensos junto com ela quando "lojas" está ligado). */
+    var extraStores: List<String>
+        get() = csv(prefs.getString("store_extra", null))
+        set(v) = prefs.edit().putString("store_extra", v.joinToString(",")).apply()
+
+    // Política gerenciada do Chrome (melhor esforço; cada item é independente).
+
+    /** Desliga o DNS-sobre-HTTPS do Chrome (só enquanto o filtro está ativo): senão ele ignora o DNS filtrante. */
+    var chromeDohOff: Boolean
+        get() = prefs.getBoolean("chrome_doh_off", true)
+        set(v) = prefs.edit().putBoolean("chrome_doh_off", v).apply()
+
+    var chromeSafeSearch: Boolean
+        get() = prefs.getBoolean("chrome_safesearch", true)
+        set(v) = prefs.edit().putBoolean("chrome_safesearch", v).apply()
+
+    /** Modo restrito do YouTube no Chrome: 0 desligado, 1 moderado, 2 estrito. */
+    var chromeYoutube: Int
+        get() = prefs.getString("chrome_youtube", null)?.toIntOrNull()?.coerceIn(0, 2) ?: 1
+        set(v) = prefs.edit().putString("chrome_youtube", v.coerceIn(0, 2).toString()).apply()
+
+    /** Desativa o modo anônimo do Chrome (só esconde histórico; não escapa do DNS filtrante). */
+    var chromeIncognitoBlock: Boolean
+        get() = prefs.getBoolean("chrome_incognito_block", false)
+        set(v) = prefs.edit().putBoolean("chrome_incognito_block", v).apply()
 
     /** Estado completo como mapa chave → texto (base do atraso de desbloqueio). */
     fun snapshot(): Map<String, String> = linkedMapOf<String, String>().also { m ->
@@ -169,7 +205,11 @@ class Config(context: Context) {
         m["dev_window_seconds"] = devWindowSeconds.toString()
         m["dev_reboot"] = devReboot.toString()
         m["postpone_updates"] = postponeUpdates.toString()
-        m["chrome_policy"] = chromePolicy.toString()
+        m["store_extra"] = extraStores.joinToString(",")
+        m["chrome_doh_off"] = chromeDohOff.toString()
+        m["chrome_safesearch"] = chromeSafeSearch.toString()
+        m["chrome_youtube"] = chromeYoutube.toString()
+        m["chrome_incognito_block"] = chromeIncognitoBlock.toString()
         m[Gate.KEY_DELAY] = unlockDelayMin.toString()
         m["protected_pkgs"] = protectedPackages.joinToString(",")
     }
@@ -186,7 +226,7 @@ class Config(context: Context) {
         const val DEFAULT_DELAY_MIN = 24L * 60
         private val STRING_KEYS = setOf(
             "canary", "routed_extra", "browsers_exempt", "dev_windows_per_day", "dev_window_seconds",
-            Gate.KEY_DELAY, "protected_pkgs",
+            Gate.KEY_DELAY, "protected_pkgs", "store_extra", "chrome_youtube",
         )
 
         private fun csv(s: String?) = s.orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }

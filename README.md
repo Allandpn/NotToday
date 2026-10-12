@@ -9,7 +9,8 @@ A especificação completa e as decisões estão em [docs/SPEC.md](docs/SPEC.md)
 
 ## Como funciona
 
-- **O filtro é o Pi-hole** (no Raspberry, 24/7), alcançado pelo **Tailscale**. O app não gerencia domínios.
+- **O filtro é o seu servidor DNS** (o exemplo de referência é um Pi-hole num Raspberry, 24/7; serve também AdGuard Home ou
+  qualquer DNS que devolva bloqueio como NXDOMAIN/`0.0.0.0`), alcançado pelo **Tailscale**. O app não gerencia domínios.
 - O DPC faz o Tailscale ser a VPN **sempre ativa** (`setAlwaysOnVpnPackage`, sem diálogo e sem lockdown) e envia a
   configuração gerenciada `UseTailscaleDNSSettings=always` e `IncludedPackageNames` = **apps marcados** + o próprio NotToday.
   Só esses apps passam pelo Pi-hole; os demais usam a conexão direta. Não há `ForceEnabled`: você liga e desliga o
@@ -76,18 +77,24 @@ Conferir manualmente: `adb shell dumpsys device_policy` e
 
 ## Restrições
 
-Padrão ligado: tethering/hotspot, Wi-Fi Direct, reset de rede, USB de arquivos, desinstalar apps, controle de apps,
-fontes desconhecidas (+ global), modo seguro, novos usuários, perfis gerenciados, Espaço Privado, perfil clone, DNS privado,
-VPN, data/hora. **Desligadas por padrão**: instalar apps (a Play Store precisa instalar), contas, rede móvel/APN, Wi-Fi,
-troca de usuário, reset de fábrica, **depuração USB**. Tudo alternável na tela; para adicionar, inclua uma linha em
-`Catalog.restrictions`. Além delas: lojas alternativas e instaladores de pacote suspensos (a Play Store não);
-`setUninstallBlocked` e `setUserControlDisabledPackages` no NotToday, no Tailscale e nos "apps protegidos extras".
+Os padrões miram só o que tira o filtro com poucos toques; o resto fica livre para não gerar atrito.
+
+- **Ligadas por padrão** (cada uma fecha um desvio do filtro): DNS privado, VPN, modo seguro, novos usuários, perfis
+  gerenciados, Espaço Privado, perfil clone, fontes desconhecidas (+ global), reset de rede, data/hora e **reset de fábrica
+  pelas Configurações** (desligue se quiser essa saída para PIN perdido).
+- **Desligadas por padrão** (atrito sem ganho para o filtro): desinstalar/parar/limpar dados de qualquer app (o NotToday, o
+  Tailscale e os "apps protegidos" já têm proteção própria via `setUninstallBlocked` e `setUserControlDisabledPackages`),
+  hotspot/tethering/Wi-Fi Direct, USB de arquivos, instalar apps, contas, rede móvel/APN, Wi-Fi, troca de usuário e a
+  **depuração USB** (ligue por último).
+- **Lojas alternativas** (Galaxy Store, GetApps, AppGallery, F-Droid etc. + as suas, em "lojas extras"): suspensão opcional,
+  desligada por padrão; com "suspender apps novos" ligado ela é redundante.
+- Tudo alternável na tela; para acrescentar uma restrição, inclua uma linha em `Catalog.restrictions`.
 
 ## Anti-impulso
 
 - **Atraso de desbloqueio** (definido ao criar o PIN; padrão 24 h; 0 só para testes). Tudo que *afrouxa* a proteção vira um
-  **pedido**: desligar restrição ou filtro, trocar o canário, tirar app do Pi-hole, isentar navegador, desligar a suspensão de
-  apps novos, aumentar as janelas de desenvolvimento, diminuir o atraso, remover o Device Owner. Só confirma depois do atraso
+  **pedido**: desligar restrição ou filtro, trocar o canário, tirar app do filtro, isentar navegador, desligar a suspensão de
+  apps novos, baixar o nível do YouTube/SafeSearch/DoH do Chrome, aumentar as janelas de desenvolvimento, diminuir o atraso, remover o Device Owner. Só confirma depois do atraso
   e vale mais 24 h. Endurecer vale na hora. **Aprovar app novo** só pede o PIN.
 - Contagem: relógio monotônico no mesmo boot; relógio de parede só com hora automática + `no_config_date_time`.
 - **Janela de manutenção** (30 min, com atraso): libera ADB, instalar apps, fontes desconhecidas, USB e lojas.
@@ -96,7 +103,9 @@ troca de usuário, reset de fábrica, **depuração USB**. Tudo alternável na t
   de shell estilo Shizuku). A contagem não zera com reinício. Só vale com `no_debugging_features` ligado.
 - **Vigia**: serviço de guarda (~20 s) + alarme (1 min) + reaplicação completa a cada 5 min, no boot e ao abrir o app.
 - **O app não trava na abertura**: política em thread própria com `try/catch` por passo; erro de tela mostra a mensagem e volta ao PIN.
-- **Chrome** (melhor esforço, configuração gerenciada): SafeSearch, YouTube restrito, sem anônima, DoH desligado (`chrome://policy`).
+- **Chrome** (melhor esforço, configuração gerenciada, `chrome://policy`), cada item na tela: DoH desligado (recomendado:
+  senão o Chrome ignora o DNS filtrante), SafeSearch, YouTube restrito (desligado/moderado/estrito; padrão moderado) e
+  bloqueio do modo anônimo (padrão desligado: o anônimo não escapa do DNS).
 
 ## Desenvolvimento sem comprometer a proteção
 

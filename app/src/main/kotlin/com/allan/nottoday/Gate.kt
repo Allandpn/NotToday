@@ -14,6 +14,9 @@ object Gate {
     /** Números em que "maior" dá mais acesso ao desenvolvedor. */
     private val HIGHER_LOOSENS = setOf("dev_windows_per_day", "dev_window_seconds")
 
+    /** Numeros em que "menor" da mais acesso (ex.: nivel do YouTube restrito: 2 estrito, 0 desligado). */
+    private val LOWER_LOOSENS = setOf("chrome_youtube")
+
     private fun csv(s: String?) = s.orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 
     fun classify(key: String, old: String?, new: String): Change = when {
@@ -25,10 +28,12 @@ object Gate {
             if ((new.toLongOrNull() ?: 0) < (old?.toLongOrNull() ?: 0)) Change.LOOSEN else Change.TIGHTEN
         key in HIGHER_LOOSENS ->
             if ((new.toLongOrNull() ?: 0) > (old?.toLongOrNull() ?: 0)) Change.LOOSEN else Change.TIGHTEN
+        key in LOWER_LOOSENS ->
+            if ((new.toLongOrNull() ?: 0) < (old?.toLongOrNull() ?: 0)) Change.LOOSEN else Change.TIGHTEN
         // Tirar itens destas listas reduz a proteção.
-        key == "protected_pkgs" || key == "routed_extra" ->
+        key == "protected_pkgs" || key == "routed_extra" || key == "store_extra" ->
             if ((csv(old) - csv(new)).isNotEmpty()) Change.LOOSEN else Change.TIGHTEN
-        // Navegador isento = navegador fora do Pi-hole: acrescentar afrouxa, tirar da lista endurece.
+        // Navegador isento = navegador fora do filtro: acrescentar afrouxa, tirar da lista endurece.
         key == "browsers_exempt" -> if ((csv(new) - csv(old)).isNotEmpty()) Change.LOOSEN else Change.TIGHTEN
         // Demais chaves são booleanas e "ligado" é o lado mais protegido.
         old == "true" && new == "false" -> Change.LOOSEN

@@ -6,10 +6,12 @@ import android.os.Bundle
 import android.os.UserManager
 import android.text.InputType
 import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -210,12 +212,20 @@ class MainActivity : Activity() {
         section("Lojas")
         val suspend = switchRow(
             "Suspender lojas alternativas e instaladores de pacote", config.suspendBlocked,
-            "Galaxy Store e instaladores de pacote. A Play Store continua liberada para atualizar apps.",
+            "Galaxy Store, GetApps, AppGallery, F-Droid etc. A Play Store continua liberada. Com \"Suspender apps novos\" " +
+                "ligado, esta opção é redundante (o app novo já fica suspenso).",
         )
+        text("Lojas extras (pacotes separados por vírgula), suspensas junto com as acima.")
+        val storeExtra = EditText(this).apply {
+            setText(config.extraStores.joinToString(", "))
+            inputType = InputType.TYPE_CLASS_TEXT
+        }
+        content.addView(storeExtra)
 
-        section("Filtro (Pi-hole pelo Tailscale)")
+        section("Filtro (DNS pelo Tailscale)")
         text(
-            "O Tailscale vira a VPN sempre ativa e leva ao Pi-hole só os apps marcados. Instale o Tailscale e faça " +
+            "O Tailscale vira a VPN sempre ativa e leva ao seu servidor DNS filtrante (Pi-hole, AdGuard Home etc., " +
+                "definido como DNS da tailnet) só os apps marcados. Instale o Tailscale e faça " +
                 "login ANTES de ativar o Device Owner. Você liga e desliga o Tailscale no app dele.",
         )
         val filterOn = switchRow("Filtro ativo (Tailscale sempre ativo)", config.dnsFilterEnabled)
@@ -223,7 +233,7 @@ class MainActivity : Activity() {
             "Apps marcados só funcionam com o filtro confirmado", config.browsersNeedFilter,
             "Sem VPN ou com o canário resolvendo, os apps marcados são suspensos; os demais seguem com internet.",
         )
-        text("Domínio-canário: um domínio REAL (existente) que o Pi-hole mantém bloqueado. Sem ele, os apps marcados ficam suspensos.")
+        text("Domínio-canário: um domínio REAL (existente) que o seu servidor DNS mantém bloqueado. Sem ele, os apps marcados ficam suspensos.")
         val canary = EditText(this).apply {
             setText(config.canary)
             hint = "ex.: canario.exemplo.com"
@@ -236,11 +246,11 @@ class MainActivity : Activity() {
         val routedSummary = TextView(this)
         fun refreshSummary() {
             val browsers = Browsers.installed(this) - exemptDraft
-            routedSummary.text = "No Pi-hole: ${(browsers + extraDraft).distinct().joinToString { PackageGuard.label(this, it) }.ifEmpty { "nenhum app" }}"
+            routedSummary.text = "No filtro: ${(browsers + extraDraft).distinct().joinToString { PackageGuard.label(this, it) }.ifEmpty { "nenhum app" }}"
         }
         refreshSummary()
         content.addView(routedSummary)
-        button("Escolher apps enviados ao Pi-hole") {
+        button("Escolher apps que passam pelo filtro") {
             pickApps(extraDraft, exemptDraft) { extra, exempt ->
                 extraDraft = extra
                 exemptDraft = exempt
@@ -251,7 +261,8 @@ class MainActivity : Activity() {
         section("Apps novos (Play Store)")
         val newDeny = switchRow(
             "Suspender apps novos até a aprovação", config.newAppsDeny,
-            "Instalar é livre; o app novo é suspenso logo em seguida e só abre depois que a pessoa de confiança aprova aqui.",
+            "Instalar é livre; o app novo é suspenso logo em seguida e só abre depois que a pessoa de confiança aprova aqui. " +
+                "Navegadores novos entram sozinhos no filtro.",
         )
         renderApprovals(owner)
 
@@ -278,14 +289,31 @@ class MainActivity : Activity() {
             "Mata processos de shell iniciados durante a janela (estilo Shizuku).",
         )
 
+        section("Chrome (configuração gerenciada)")
+        text("Melhor esforço, confira em chrome://policy. Não vale para outros navegadores.")
+        val chromeDoh = switchRow(
+            "Desligar DNS sobre HTTPS", config.chromeDohOff,
+            "Recomendado: com DoH o Chrome ignora o servidor DNS filtrante. Só vale com o filtro ativo.",
+        )
+        val chromeSafe = switchRow("Forçar SafeSearch do Google", config.chromeSafeSearch)
+        text("YouTube restrito no Chrome:")
+        val chromeYt = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                listOf("Desligado", "Moderado", "Estrito"),
+            )
+            setSelection(config.chromeYoutube)
+        }
+        content.addView(chromeYt)
+        val chromeIncog = switchRow(
+            "Bloquear modo anônimo", config.chromeIncognitoBlock,
+            "Opcional: o anônimo não escapa do DNS filtrante, só esconde o histórico.",
+        )
+
         section("Sistema")
         val postpone = switchRow(
             "Adiar atualizações do Android (até 30 dias)", config.postponeUpdates,
             "Dá tempo de testar o app numa versão nova. Passados 30 dias o sistema instala.",
-        )
-        val chrome = switchRow(
-            "Política do Chrome: SafeSearch, YouTube restrito, sem anônima, DoH desligado", config.chromePolicy,
-            "Melhor esforço via configuração gerenciada; confira no Chrome (chrome://policy).",
         )
         text("Apps protegidos extras (pacotes separados por vírgula; ex.: AppLock). Confira com `pm list packages`.")
         val protectedPkgs = EditText(this).apply {
@@ -316,7 +344,12 @@ class MainActivity : Activity() {
             new["dev_window_seconds"] = (devSeconds.text.toString().toIntOrNull() ?: config.devWindowSeconds).coerceIn(10, 600).toString()
             new["dev_reboot"] = devReboot.isChecked.toString()
             new["postpone_updates"] = postpone.isChecked.toString()
-            new["chrome_policy"] = chrome.isChecked.toString()
+            new["chrome_doh_off"] = chromeDoh.isChecked.toString()
+            new["chrome_safesearch"] = chromeSafe.isChecked.toString()
+            new["chrome_youtube"] = chromeYt.selectedItemPosition.toString()
+            new["chrome_incognito_block"] = chromeIncog.isChecked.toString()
+            new["store_extra"] = storeExtra.text.toString().split(',', ' ').map { it.trim() }
+                .filter { it.isNotEmpty() }.joinToString(",")
             new["protected_pkgs"] = protectedPkgs.text.toString().split(',', ' ').map { it.trim() }
                 .filter { it.isNotEmpty() }.joinToString(",")
             delay.text.toString().toLongOrNull()?.coerceIn(0, 24 * 14)?.let { new[Gate.KEY_DELAY] = (it * 60).toString() }
@@ -365,7 +398,7 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Escolha dos apps que vão ao Pi-hole. Navegadores vêm marcados; desmarcar um navegador o isenta. */
+    /** Escolha dos apps que passam pelo filtro. Navegadores vêm marcados; desmarcar um navegador o isenta. */
     private fun pickApps(extra: Set<String>, exempt: Set<String>, onDone: (Set<String>, Set<String>) -> Unit) {
         val browsers = Browsers.installed(this).toSet()
         val candidates = (PackageGuard.launcherApps(this) + browsers)
@@ -378,7 +411,7 @@ class MainActivity : Activity() {
         }
         val names = candidates.map { p -> PackageGuard.label(this, p) + if (p in browsers) "  [navegador]" else "" }.toTypedArray()
         AlertDialog.Builder(this)
-            .setTitle("Apps que passam pelo Pi-hole")
+            .setTitle("Apps que passam pelo filtro")
             .setMultiChoiceItems(names, checked) { _, which, isChecked -> checked[which] = isChecked }
             .setNegativeButton("Cancelar", null)
             .setPositiveButton("OK") { _, _ ->
@@ -500,13 +533,17 @@ class MainActivity : Activity() {
             "browsers_need_filter" -> "Apps marcados só com filtro confirmado"
             "dns_filter" -> "Filtro ativo"
             "canary" -> "Domínio-canário"
-            "routed_extra" -> "Apps no Pi-hole"
-            "browsers_exempt" -> "Navegadores fora do Pi-hole"
+            "routed_extra" -> "Apps no filtro"
+            "browsers_exempt" -> "Navegadores fora do filtro"
             "new_apps_deny" -> "Suspender apps novos"
             "dev_windows_per_day" -> "Janelas de desenvolvimento por 24 h"
             "dev_window_seconds" -> "Duração da janela de desenvolvimento (s)"
             "dev_reboot" -> "Reiniciar ao fim da janela de desenvolvimento"
-            "chrome_policy" -> "Política do Chrome"
+            "store_extra" -> "Lojas extras"
+            "chrome_doh_off" -> "Chrome: DNS sobre HTTPS desligado"
+            "chrome_safesearch" -> "Chrome: SafeSearch"
+            "chrome_youtube" -> "Chrome: YouTube restrito (0 desligado, 1 moderado, 2 estrito)"
+            "chrome_incognito_block" -> "Chrome: bloquear modo anônimo"
             "protected_pkgs" -> "Apps protegidos"
             Gate.KEY_DELAY -> "Atraso de desbloqueio (min)"
             else -> key

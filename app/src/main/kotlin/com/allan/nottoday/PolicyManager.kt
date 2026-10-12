@@ -73,7 +73,7 @@ class PolicyManager(private val context: Context) {
         step(log, "vpn") { applyVpn(log, release = false) }
         step(log, "suspensões") { reconcile(log, desiredSuspended(window)) }
         VpnWatch.register(context)
-        step(log, "chrome") { applyChromePolicy(config.dnsFilterEnabled, config.chromePolicy) }
+        step(log, "chrome") { applyChromePolicy() }
         Watchdog.schedule(context)
         GuardService.start(context)
         step(log, "atualizações") {
@@ -96,7 +96,7 @@ class PolicyManager(private val context: Context) {
         step(log, "vpn") { applyVpn(log, release = true) }
         VpnWatch.unregister(context)
         step(log, "atualizações") { dpm.setSystemUpdatePolicy(admin, null) }
-        step(log, "chrome") { applyChromePolicy(false, false) }
+        step(log, "chrome") { dpm.setApplicationRestrictions(admin, CHROME, Bundle()) }
         step(log, "autoproteção") {
             dpm.setUserControlDisabledPackages(admin, emptyList())
             val installed = PackageGuard.installedSet(context)
@@ -163,7 +163,7 @@ class PolicyManager(private val context: Context) {
 
     private fun installedStores(): List<String> {
         val installed = PackageGuard.installedSet(context)
-        return Catalog.storePackages.filter { it in installed }
+        return (Catalog.storePackages + config.extraStores).distinct().filter { it in installed }
     }
 
     /** Tudo que deve estar suspenso agora: lojas alternativas, apps marcados sem filtro e apps novos sem aprovação. */
@@ -186,7 +186,9 @@ class PolicyManager(private val context: Context) {
         var failed = emptySet<String>()
         if (want.isNotEmpty()) {
             failed = dpm.setPackagesSuspended(admin, want.toTypedArray(), true).toSet()
-            if (failed.isNotEmpty()) log += "Sem efeito (sistema recusou): $failed"
+            // Instaladores do sistema (ex.: com.google.android.packageinstaller) nao aceitam suspensao; o bloqueio de apps novos cobre isso.
+            val unexpected = failed - Catalog.storePackages.toSet()
+            if (unexpected.isNotEmpty()) log += "Sem efeito (sistema recusou): $unexpected"
         }
         val release = (previous - want).filter { it in installed }
         if (release.isNotEmpty()) dpm.setPackagesSuspended(admin, release.toTypedArray(), false)
@@ -199,7 +201,7 @@ class PolicyManager(private val context: Context) {
 
     /**
      * O Tailscale é a VPN "sempre ativa" (o Device Owner a autoriza sem diálogo; sem lockdown, para o resto do tráfego
-     * seguir direto). A configuração gerenciada manda o DNS da tailnet (o Pi-hole) e limita a VPN aos apps marcados.
+     * seguir direto). A configuração gerenciada manda o DNS da tailnet (o servidor DNS filtrante) e limita a VPN aos apps marcados.
      */
     private fun applyVpn(log: MutableList<String>, release: Boolean) {
         val want: String? = if (release || !config.dnsFilterEnabled) null else Catalog.TAILSCALE_PKG
@@ -231,7 +233,7 @@ class PolicyManager(private val context: Context) {
         val current = dpm.getApplicationRestrictions(admin, Catalog.TAILSCALE_PKG)
         if (comparable(current) != comparable(want)) {
             dpm.setApplicationRestrictions(admin, Catalog.TAILSCALE_PKG, want)
-            log += "Tailscale: política atualizada (apps no Pi-hole: ${Routing.routed(context, config)})."
+            log += "Tailscale: política atualizada (apps no filtro: ${Routing.routed(context, config)})."
         }
     }
 
@@ -244,17 +246,15 @@ class PolicyManager(private val context: Context) {
     }
 
     /**
-     * Política gerenciada do Chrome (melhor esforço, sem garantia por versão): DoH desligado quando o filtro está
-     * ativo; SafeSearch forçado, YouTube restrito e modo anônimo desativado.
+     * Política gerenciada do Chrome (melhor esforço, sem garantia por versão). Cada item é uma opção da tela:
+     * DoH desligado (só com o filtro ativo), SafeSearch, YouTube restrito (1 moderado, 2 estrito) e sem anônima.
      */
-    private fun applyChromePolicy(filterOn: Boolean, hardening: Boolean) {
+    private fun applyChromePolicy() {
         val b = Bundle()
-        if (filterOn) b.putString("DnsOverHttpsMode", "off")
-        if (hardening) {
-            b.putBoolean("ForceGoogleSafeSearch", true)
-            b.putInt("ForceYouTubeRestrict", 2)
-            b.putInt("IncognitoModeAvailability", 1)
-        }
+        if (config.dnsFilterEnabled && config.chromeDohOff) b.putString("DnsOverHttpsMode", "off")
+        if (config.chromeSafeSearch) b.putBoolean("ForceGoogleSafeSearch", true)
+        if (config.chromeYoutube > 0) b.putInt("ForceYouTubeRestrict", config.chromeYoutube)
+        if (config.chromeIncognitoBlock) b.putInt("IncognitoModeAvailability", 1)
         dpm.setApplicationRestrictions(admin, CHROME, b)
     }
 

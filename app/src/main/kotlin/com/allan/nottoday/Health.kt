@@ -92,7 +92,7 @@ object Health {
         if (!latch.await(TIMEOUT_S, TimeUnit.SECONDS)) return false to "tempo esgotado ao resolver $canary pela VPN"
         val a = answer.get() ?: return false to "erro de DNS: ${error.get()}"
         return when (DnsProbe.verdict(a)) {
-            DnsProbe.Verdict.BLOCKED -> true to "$canary bloqueado: o DNS da VPN é o Pi-hole"
+            DnsProbe.Verdict.BLOCKED -> true to "$canary bloqueado: o DNS da VPN é o servidor filtrante"
             DnsProbe.Verdict.ANSWERED -> false to "$canary RESOLVEU: o DNS da VPN não está bloqueando"
             DnsProbe.Verdict.FAILED -> false to "resposta DNS inválida para $canary"
         }
