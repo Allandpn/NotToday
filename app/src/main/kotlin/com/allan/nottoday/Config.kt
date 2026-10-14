@@ -229,6 +229,30 @@ class Config(context: Context) {
             Gate.KEY_DELAY, "protected_pkgs", "store_extra", "chrome_youtube",
         )
 
+        private val DOMAIN = Regex("^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$")
+        private val PKG = Regex("^[A-Za-z0-9._]{1,200}$")
+
+        /**
+         * Valida e normaliza um valor vindo de fora (canal remoto) para a chave `key` do [snapshot].
+         * Devolve null se não serve. Rigoroso de propósito: [applySnapshot] grava qualquer texto não reconhecido
+         * como `false`, o que afrouxaria a proteção sem passar pelo atraso.
+         */
+        fun normalize(key: String, value: String): String? {
+            if (value.length > 2000 || value.any { it == '\n' || it == '\r' || it == '\t' }) return null
+            return when (key) {
+                "dev_windows_per_day" -> value.toIntOrNull()?.takeIf { it in 0..20 }?.toString()
+                "dev_window_seconds" -> value.toIntOrNull()?.takeIf { it in 10..600 }?.toString()
+                Gate.KEY_DELAY -> value.toLongOrNull()?.takeIf { it in 0..(24L * 14 * 60) }?.toString()
+                "chrome_youtube" -> value.toIntOrNull()?.takeIf { it in 0..2 }?.toString()
+                "canary" -> value.trim().lowercase().takeIf { it.isEmpty() || DOMAIN.matches(it) }
+                "routed_extra", "browsers_exempt", "protected_pkgs", "store_extra" -> {
+                    val parts = value.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+                    if (parts.all { PKG.matches(it) }) parts.joinToString(",") else null
+                }
+                else -> if (value == "true" || value == "false") value else null
+            }
+        }
+
         private fun csv(s: String?) = s.orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }
     }
 }

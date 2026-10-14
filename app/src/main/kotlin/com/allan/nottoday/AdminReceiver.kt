@@ -7,7 +7,8 @@ import android.content.Intent
 class AdminReceiver : DeviceAdminReceiver() {
     /** Chamado logo após `dpm set-device-owner`: já aplica o estado padrão. */
     override fun onEnabled(context: Context, intent: Intent) {
-        PinStore(context).openFirstPinWindow()
+        // Pareado com guardião remoto: o PIN vem do site. Abrir a janela deixaria o usuário criar um PIN próprio.
+        if (!com.allan.nottoday.remote.RemoteStore(context).isPaired) PinStore(context).openFirstPinWindow()
         runAsync { PolicyManager(context).apply() }
     }
 }

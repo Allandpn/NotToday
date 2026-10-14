@@ -8,6 +8,8 @@ import android.content.Context
 import android.os.Bundle
 import android.os.UserManager
 import android.provider.Settings
+import com.allan.nottoday.remote.Pairing
+import com.allan.nottoday.remote.RemoteStore
 
 /** Aplica o estado desejado (Config) via DevicePolicyManager. Exige ser Device Owner. */
 class PolicyManager(private val context: Context) {
@@ -20,7 +22,8 @@ class PolicyManager(private val context: Context) {
     /** Falha fechada: com Device Owner e sem PIN (dados apagados) não se mexe em nada. */
     private fun canAct(): Boolean {
         val pins = PinStore(context)
-        return pins.isSet || pins.firstPinAllowedAsOwner
+        // Aparelho pareado com guardião remoto: o guardião define o PIN pelo site, então não precisa de PIN local para agir.
+        return pins.isSet || pins.firstPinAllowedAsOwner || RemoteStore(context).isPaired
     }
 
     /** Aplica tudo. Cada passo é isolado: uma falha não impede os demais. Devolve o log. */
@@ -104,6 +107,7 @@ class PolicyManager(private val context: Context) {
                 .filter { it in installed }.forEach { dpm.setUninstallBlocked(admin, it, false) }
         }
         dpm.clearDeviceOwnerApp(context.packageName)
+        Pairing.unpair(context) // para o canal, apaga o pareamento e a chave do aparelho
         PinStore(context).clear()
         PinStore(context, DEV_PIN).clear()
         config.clear()

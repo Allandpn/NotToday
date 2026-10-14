@@ -62,6 +62,7 @@ class GuardService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        com.allan.nottoday.remote.RemoteChannel.start(this)
         // Cada (re)início roda um batimento imediato e recalcula o intervalo.
         handler?.removeCallbacks(ticker)
         handler?.post(ticker)
@@ -72,6 +73,7 @@ class GuardService : Service() {
 
     override fun onDestroy() {
         running = false
+        com.allan.nottoday.remote.RemoteChannel.stop()
         try {
             unregisterReceiver(packageReceiver)
         } catch (_: Exception) {

@@ -65,7 +65,7 @@ class Pending(
     val boot: Int,
     val delayMs: Long,
 ) {
-    enum class Kind { SETTINGS, RELEASE, MAINTENANCE }
+    enum class Kind { SETTINGS, RELEASE, MAINTENANCE, GUARDIAN }
 
     sealed class Status {
         data class Waiting(val remainingMs: Long) : Status()

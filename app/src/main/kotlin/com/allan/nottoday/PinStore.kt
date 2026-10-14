@@ -58,6 +58,16 @@ class PinStore(context: Context, name: String = "pin") {
         return ok
     }
 
+    /**
+     * Compara sem contar tentativa nem bloquear. Só para o canal remoto impedir que o PIN principal e o de
+     * desenvolvedor sejam iguais (a tela usa [verify]).
+     */
+    fun matches(pin: String): Boolean {
+        val salt = Base64.decode(prefs.getString("salt", null) ?: return false, Base64.NO_WRAP)
+        val expected = Base64.decode(prefs.getString("hash", null) ?: return false, Base64.NO_WRAP)
+        return MessageDigest.isEqual(expected, hash(pin, salt))
+    }
+
     fun clear() = prefs.edit().clear().apply()
 
     private fun hash(pin: String, salt: ByteArray): ByteArray =

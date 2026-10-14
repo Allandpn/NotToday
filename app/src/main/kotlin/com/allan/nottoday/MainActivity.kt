@@ -15,6 +15,13 @@ import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import com.allan.nottoday.remote.CommandException
+import com.allan.nottoday.remote.Pairing
+import com.allan.nottoday.remote.RemoteChannel
+import com.allan.nottoday.remote.RemoteStore
+import com.allan.nottoday.remote.GatewayApi
+import com.allan.nottoday.remote.DeviceKey
+import com.allan.nottoday.remote.DevAuth
 
 /**
  * Uma Activity, várias telas montadas em código: definir PIN → desbloquear → configurar.
@@ -29,9 +36,11 @@ class MainActivity : Activity() {
     private lateinit var maintenance: Maintenance
     private lateinit var devWindow: DevWindow
     private lateinit var approved: Approved
+    private lateinit var remote: RemoteStore
     private lateinit var content: LinearLayout
     private var unlocked = false
     private var changingPin = false
+    private var pairing = false
 
     private val logView by lazy { TextView(this) }
 
@@ -45,6 +54,7 @@ class MainActivity : Activity() {
         maintenance = Maintenance(this)
         devWindow = DevWindow(this)
         approved = Approved(this)
+        remote = RemoteStore(this)
 
         content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -66,12 +76,15 @@ class MainActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
+        // Antes do Device Owner o canal só roda com a tela aberta (o serviço de guarda o assume depois).
+        if (remote.isPaired) RemoteChannel.start(applicationContext)
         render()
     }
 
     override fun onStop() {
         super.onStop()
         unlocked = false
+        if (!policy.isDeviceOwner()) RemoteChannel.stop()
     }
 
     /** Nunca deixa uma falha de tela impedir o PIN: se algo quebrar, mostra o erro e volta ao bloqueio. */
@@ -79,8 +92,11 @@ class MainActivity : Activity() {
         content.removeAllViews()
         try {
             val owner = policy.isDeviceOwner()
+            val paired = remote.isPaired
             when {
-                !pins.isSet && owner && !pins.firstPinAllowedAsOwner -> renderBroken()
+                !pins.isSet && owner && !pins.firstPinAllowedAsOwner && !paired -> renderBroken()
+                !pins.isSet && paired -> renderAwaitingGuardian(owner)
+                pairing -> renderPair()
                 !pins.isSet || changingPin -> renderSetPin()
                 !unlocked -> renderUnlock(owner)
                 else -> renderSettings(owner)
@@ -136,6 +152,134 @@ class MainActivity : Activity() {
             changingPin = false
             render()
         }
+        if (!changingPin) {
+            section("Guardião remoto")
+            text("Se a pessoa de confiança está em outro lugar, pareie com ela em vez de definir o PIN aqui: ela define o PIN pelo site.")
+            button("Parear com guardião remoto") {
+                pairing = true
+                render()
+            }
+        }
+    }
+
+    // --- Guardião remoto -------------------------------------------------------------
+
+    private fun renderPair() {
+        title("Parear com guardião remoto")
+        text("No site do guardião: Guardiões → Parear aparelho. Cole aqui a string gerada (vale 24 h, uso único).")
+        val str = EditText(this).apply {
+            hint = "string de pareamento"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 3
+        }
+        content.addView(str, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        val name = EditText(this).apply {
+            hint = "nome deste aparelho"
+            setText(android.os.Build.MODEL ?: "Aparelho")
+        }
+        content.addView(name)
+        button("Parear") {
+            val s = str.text.toString()
+            val n = name.text.toString()
+            logView.text = "Pareando…"
+            if (logView.parent == null) content.addView(logView)
+            runAsync {
+                val msg = try {
+                    val fp = Pairing.register(this, s, n)
+                    RemoteChannel.start(applicationContext)
+                    pairing = false
+                    "Pareado. Fingerprint: $fp"
+                } catch (e: CommandException) {
+                    "Não foi possível parear: ${e.message}"
+                } catch (e: Exception) {
+                    "Não foi possível parear: ${e.message ?: e.javaClass.simpleName}"
+                }
+                runOnUiThread {
+                    toast(msg)
+                    render()
+                }
+            }
+        }
+        button("Voltar") {
+            pairing = false
+            render()
+        }
+    }
+
+    /** Pareado e ainda sem PIN: só o guardião (pelo site) pode definir o PIN. Aqui nada é criado. */
+    private fun renderAwaitingGuardian(owner: Boolean) {
+        title("Aguardando o guardião")
+        text(
+            "Este aparelho está pareado com um guardião remoto. Fingerprint:\n${remote.fingerprint ?: "?"}\n\n" +
+                "Confira por voz com o guardião; ele define o PIN pelo site e envia a ativação.",
+        )
+        text(
+            "Canal: ${RemoteChannel.status}" + (Diag.lastError?.let { "\nErro: $it" } ?: "") +
+                if (remote.activated) "\nAtivado pelo guardião." else "\nAinda não ativado.",
+        )
+        if (!owner) {
+            text("Ative o Device Owner só depois que o guardião ativar: adb shell dpm set-device-owner $packageName/.AdminReceiver")
+            button("Desfazer o pareamento") {
+                Pairing.unpair(this)
+                render()
+            }
+        }
+        button("Atualizar") { render() }
+    }
+
+    /** Pedido ao guardião (sem PIN): chega ao site dele como pedido para decidir. Não concede nada. */
+    private fun renderRequestToGuardian() {
+        if (!remote.isPaired) return
+        section("Pedir ao guardião")
+        val what = EditText(this).apply {
+            hint = "domínio ou app, e o motivo"
+            inputType = InputType.TYPE_CLASS_TEXT
+        }
+        content.addView(what)
+        for ((label, kind) in listOf("Pedir domínio" to "domain", "Pedir app" to "app", "Outro pedido" to "other")) {
+            button(label) {
+                val t = what.text.toString().trim()
+                if (t.isEmpty()) return@button toast("Escreva o pedido")
+                runAsync {
+                    val msg = try {
+                        val c = remote.consumer() ?: throw CommandException("sem pareamento")
+                        GatewayApi(remote.gateway ?: throw CommandException("sem gateway"))
+                            .call("POST", "/v1/devices/${c.dev}/requests", mapOf("kind" to kind, "text" to t.take(500)))
+                        "Pedido enviado"
+                    } catch (e: Exception) {
+                        "Não foi possível enviar: ${e.message ?: e.javaClass.simpleName}"
+                    }
+                    runOnUiThread { toast(msg) }
+                }
+            }
+        }
+    }
+
+    private fun renderRemoteSettings(owner: Boolean) {
+        section("Guardião remoto")
+        if (!remote.isPaired) {
+            text("Nenhum guardião remoto pareado.")
+            button("Parear com guardião remoto") {
+                pairing = true
+                render()
+            }
+            return
+        }
+        text(
+            "Pareado. Fingerprint: ${remote.fingerprint ?: "?"}\nGateway: ${remote.gateway}\nCanal: ${RemoteChannel.status}" +
+                (if (remote.activated) "\nAtivado pelo guardião." else "\nAinda não ativado pelo guardião."),
+        )
+        if (!owner) button("Desfazer o pareamento") {
+            AlertDialog.Builder(this)
+                .setTitle("Desfazer o pareamento?")
+                .setMessage("O guardião deixa de controlar este aparelho pelo site.")
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("Desfazer") { _, _ ->
+                    Pairing.unpair(this)
+                    render()
+                }
+                .show()
+        } else text("Com o Device Owner ativo, o pareamento só sai com a remoção do Device Owner (pedido com atraso).")
     }
 
     private fun renderUnlock(owner: Boolean) {
@@ -152,6 +296,7 @@ class MainActivity : Activity() {
             }
         }
         if (owner) renderDevWindowLogin()
+        renderRequestToGuardian()
     }
 
     /** Janela de desenvolvimento: com o PIN de desenvolvedor (não é o da pessoa de confiança) abre só o ADB. */
@@ -369,6 +514,8 @@ class MainActivity : Activity() {
             render()
         }
 
+        renderRemoteSettings(owner)
+
         section("Zona de perigo")
         if (owner) button(if (gateOn) "Pedir remoção do Device Owner" else "Remover Device Owner") {
             if (gateOn) {
@@ -576,8 +723,10 @@ class MainActivity : Activity() {
                     Pending.Kind.SETTINGS -> "Pedido: afrouxar configurações"
                     Pending.Kind.RELEASE -> "Pedido: remover Device Owner"
                     Pending.Kind.MAINTENANCE -> "Pedido: janela de manutenção"
+                    Pending.Kind.GUARDIAN -> "Pedido: remover guardião"
                 },
             )
+            if (kind == Pending.Kind.GUARDIAN) text("Guardião: ${p.payload["id"] ?: "?"}")
             if (kind == Pending.Kind.SETTINGS) {
                 val current = config.snapshot()
                 text(p.payload.entries.joinToString("\n") { (k, v) -> "• ${labelFor(k)}: ${current[k]} → $v" })
@@ -591,6 +740,7 @@ class MainActivity : Activity() {
                             Pending.Kind.SETTINGS -> "Confirmar alterações"
                             Pending.Kind.RELEASE -> "Confirmar remoção do Device Owner"
                             Pending.Kind.MAINTENANCE -> "Iniciar janela de ${Maintenance.DEFAULT_MINUTES} min"
+                            Pending.Kind.GUARDIAN -> "Confirmar remoção do guardião"
                         },
                     ) { confirmPending(p) }
                 }
@@ -627,6 +777,20 @@ class MainActivity : Activity() {
                 runAndShow("Abrindo janela…") { policy.apply() }
             }
             Pending.Kind.RELEASE -> confirmRelease()
+            Pending.Kind.GUARDIAN -> {
+                val id = p.payload["id"]
+                val c = remote.consumer()
+                if (id != null && c != null) {
+                    try {
+                        c.applyTrust(com.allan.nottoday.remote.Command(c.dev, "", 0, "remove_guardian", mapOf("id" to id)))
+                        remote.saveConsumer(c)
+                    } catch (e: CommandException) {
+                        toast(e.message ?: "falhou")
+                    }
+                }
+                pendings.clear(p.kind)
+                render()
+            }
         }
     }
 
