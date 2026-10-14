@@ -181,28 +181,47 @@ class MainActivity : Activity() {
         button("Parear") {
             val s = str.text.toString()
             val n = name.text.toString()
-            logView.text = "Pareando…"
-            if (logView.parent == null) content.addView(logView)
-            runAsync {
-                val msg = try {
-                    val fp = Pairing.register(this, s, n)
-                    RemoteChannel.start(applicationContext)
-                    pairing = false
-                    "Pareado. Fingerprint: $fp"
-                } catch (e: CommandException) {
-                    "Não foi possível parear: ${e.message}"
-                } catch (e: Exception) {
-                    "Não foi possível parear: ${e.message ?: e.javaClass.simpleName}"
-                }
-                runOnUiThread {
-                    toast(msg)
-                    render()
-                }
+            val parsed = try {
+                Pairing.parse(s)
+            } catch (e: CommandException) {
+                return@button toast(e.message ?: "string de pareamento inválida")
             }
+            // A lista de guardiões veio do gateway: quem confirma o pareamento tem de conferi-la com o guardião por voz.
+            val who = parsed.trust.guardians.values.joinToString("\n") { "• ${it.name} (${it.creds.size} passkey(s))" }
+            AlertDialog.Builder(this)
+                .setTitle("Parear com estes guardiões?")
+                .setMessage(
+                    "Gateway: ${parsed.url}\n\nQuem poderá controlar este aparelho:\n$who\n\n" +
+                        "Confira os nomes com o guardião por voz. Se algum não for esperado, não continue.",
+                )
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("Parear") { _, _ -> register(s, n) }
+                .show()
         }
         button("Voltar") {
             pairing = false
             render()
+        }
+    }
+
+    private fun register(pairingString: String, name: String) {
+        logView.text = "Pareando…"
+        if (logView.parent == null) content.addView(logView)
+        runAsync {
+            val msg = try {
+                val fp = Pairing.register(this, pairingString, name)
+                RemoteChannel.start(applicationContext)
+                pairing = false
+                "Pareado. Fingerprint: $fp"
+            } catch (e: CommandException) {
+                "Não foi possível parear: ${e.message}"
+            } catch (e: Exception) {
+                "Não foi possível parear: ${e.message ?: e.javaClass.simpleName}"
+            }
+            runOnUiThread {
+                toast(msg)
+                render()
+            }
         }
     }
 
