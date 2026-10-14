@@ -1,4 +1,4 @@
-# Guardião remoto (lado do aparelho)
+# Guardian remoto (lado do aparelho)
 
 O NotToday pode ser controlado pelas pessoas de confiança por um **site** (repositório
 [guardian](https://github.com/Allandpn/guardian)) em vez de só pelo PIN no aparelho. O protocolo está em
@@ -27,7 +27,7 @@ Valores de `set_config` passam por `Config.normalize` (booleanos só `true`/`fal
 ## Fluxo de pareamento (remoto)
 
 1. O guardião, no site: **Guardiões → Parear aparelho** e envia a string de pareamento.
-2. No aparelho (antes de definir PIN e **antes do `set-device-owner`**): tela de PIN → **Parear com guardião remoto** → cola a string.
+2. No aparelho (antes de definir PIN e **antes do `set-device-owner`**): tela de PIN → **Parear com Guardian remoto** → cola a string.
    O app mostra antes **quem poderá controlar o aparelho** (nomes dos guardiões e o gateway): confira com o guardião por voz, porque essa
    lista veio do gateway. Ao confirmar, fixa a URL, o `rpId` e os guardiões, registra a chave do aparelho (Android Keystore, P-256) e mostra o **fingerprint**.
 3. O guardião vê o aparelho aparecer no site **verdadeiro** e confere o fingerprint **por voz**. Depois define o PIN pelo site

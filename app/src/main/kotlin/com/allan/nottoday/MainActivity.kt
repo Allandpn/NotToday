@@ -164,20 +164,20 @@ class MainActivity : Activity() {
             render()
         }
         if (!changingPin) {
-            section("Guardião remoto")
+            section("Guardian remoto")
             text("Se a pessoa de confiança está em outro lugar, pareie com ela em vez de definir o PIN aqui: ela define o PIN pelo site.")
-            button("Parear com guardião remoto") {
+            button("Parear com Guardian remoto") {
                 pairing = true
                 render()
             }
         }
     }
 
-    // --- Guardião remoto -------------------------------------------------------------
+    // --- Guardian remoto -------------------------------------------------------------
 
     private fun renderPair() {
-        title("Parear com guardião remoto")
-        text("No site do guardião: Guardiões → Parear aparelho. Cole aqui a string gerada (vale 24 h, uso único).")
+        title("Parear com Guardian remoto")
+        text("No site do Guardian: Guardiões → Parear aparelho. Cole aqui a string gerada (vale 24 h, uso único).")
         val str = EditText(this).apply {
             hint = "string de pareamento"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
@@ -239,7 +239,7 @@ class MainActivity : Activity() {
     /** Pareado e ainda sem PIN: só o guardião (pelo site) pode definir o PIN. Aqui nada é criado. */
     private fun renderAwaitingGuardian(owner: Boolean) {
         title("Aguardando o guardião")
-        text("Este aparelho está pareado com um guardião remoto. Leia o fingerprint para ele conferir:")
+        text("Este aparelho está pareado com um Guardian remoto. Leia o fingerprint para ele conferir:")
         fingerprintBox(remote.fingerprint ?: "?")
         text("Confira por voz com o guardião; ele define o PIN pelo site e envia a ativação. Aqui nenhum PIN pode ser criado.")
         cardText(
@@ -446,10 +446,10 @@ class MainActivity : Activity() {
     }
 
     private fun renderRemoteSettings(owner: Boolean) {
-        section("Guardião remoto")
+        section("Guardian remoto")
         if (!remote.isPaired) {
-            text("Nenhum guardião remoto pareado.")
-            button("Parear com guardião remoto") {
+            text("Nenhum Guardian remoto pareado.")
+            button("Parear com Guardian remoto") {
                 pairing = true
                 render()
             }
@@ -1003,7 +1003,7 @@ class MainActivity : Activity() {
         setTextColor(getColor(R.color.nt_text))
     })
 
-    /** Texto num cartão (estado do filtro, guardião remoto…). */
+    /** Texto num cartão (estado do filtro, Guardian remoto…). */
     private fun cardText(s: String, accent: Boolean = false) = content.addView(
         TextView(this).apply {
             text = s

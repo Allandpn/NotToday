@@ -22,7 +22,7 @@ class PolicyManager(private val context: Context) {
     /** Falha fechada: com Device Owner e sem PIN (dados apagados) não se mexe em nada. */
     private fun canAct(): Boolean {
         val pins = PinStore(context)
-        // Aparelho pareado com guardião remoto: o guardião define o PIN pelo site, então não precisa de PIN local para agir.
+        // Aparelho pareado com Guardian remoto: o guardião define o PIN pelo site, então não precisa de PIN local para agir.
         return pins.isSet || pins.firstPinAllowedAsOwner || RemoteStore(context).isPaired
     }
 

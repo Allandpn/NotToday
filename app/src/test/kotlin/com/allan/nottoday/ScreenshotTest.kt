@@ -77,7 +77,7 @@ class ScreenshotTest {
         // 1) primeira abertura: definir PIN (com o botão de parear)
         var a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         shot(a, "01-definir-pin")
-        button(a, "Parear com guardião remoto").performClick()
+        button(a, "Parear com Guardian remoto").performClick()
         shot(a, "02-parear")
         a.finish()
 

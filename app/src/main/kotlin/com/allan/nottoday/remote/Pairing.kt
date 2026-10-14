@@ -4,7 +4,7 @@ import android.content.Context
 import java.net.URI
 
 /**
- * Pareamento com o gateway a partir da string gerada no site do guardião: fixa a URL, o rpId e os guardiões em quem
+ * Pareamento com o gateway a partir da string gerada no site do Guardian: fixa a URL, o rpId e os guardiões em quem
  * este aparelho vai confiar, registra a chave do aparelho e mostra o fingerprint para o guardião conferir por voz.
  */
 object Pairing {

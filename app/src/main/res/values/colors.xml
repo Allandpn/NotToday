@@ -2,7 +2,7 @@
 <resources>
     <color name="ic_launcher_background">#042244</color>
 
-    <!-- Paleta "Mar e terra" (a mesma do site do guardião). -->
+    <!-- Paleta "Mar e terra" (a mesma do site do Guardian). -->
     <color name="nt_bg">#12202A</color>
     <color name="nt_surface">#1A2E3A</color>
     <color name="nt_surface2">#223C4A</color>

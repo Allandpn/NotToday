@@ -282,7 +282,7 @@ class RemoteCommandsTest {
         becomeOwner()
         assertFalse(PinStore(ctx).isSet)
         assertTrue(store.isPaired)
-        // apply() não desiste por falta de PIN quando há guardião remoto (veja PolicyManager.canAct)
+        // apply() não desiste por falta de PIN quando há Guardian remoto (veja PolicyManager.canAct)
         val log = PolicyManager(ctx).apply()
         assertFalse(log.toString(), log.any { it.startsWith("PIN ausente") })
         store.clear()

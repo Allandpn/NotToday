@@ -28,7 +28,7 @@ A especificação completa e as decisões estão em [docs/SPEC.md](docs/SPEC.md)
   A pessoa de confiança aprova com o PIN, sem atraso; a tela marca riscos (Shizuku, aShell, Test DPC, VPN, torrent,
   acessibilidade, navegador). Apps do sistema não entram; atualizações de apps aprovados passam direto.
 
-## Guardião remoto (opcional)
+## Guardian remoto (opcional)
 
 As pessoas de confiança podem administrar o aparelho por um **site** (repositório [guardian](https://github.com/Allandpn/guardian)): aprovar
 apps, ajustar configurações, definir os PINs (cifrados até o aparelho) e liberar domínios no Pi-hole v6. Cada comando é assinado por
@@ -51,7 +51,7 @@ app/src/main/kotlin/com/allan/nottoday/
   Gate.kt/Guard.kt   anti-impulso (atraso), janelas de manutenção e de desenvolvimento
   VpnWatch.kt/Watchdog.kt   eventos de VPN e alarme de 1 min
   Config.kt, PinStore.kt, Browsers.kt, MainActivity.kt
-  remote/            canal com o guardião remoto: protocolo (JSON, WebAuthn, comandos, caixa do PIN), pareamento,
+  remote/            canal com o Guardian remoto: protocolo (JSON, WebAuthn, comandos, caixa do PIN), pareamento,
                      chave no Keystore, long-poll, execução dos comandos e relatório (docs/REMOTO.md)
 ```
 

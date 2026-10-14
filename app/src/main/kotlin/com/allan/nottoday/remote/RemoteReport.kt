@@ -15,7 +15,7 @@ import com.allan.nottoday.PendingStore
 import com.allan.nottoday.PinStore
 import com.allan.nottoday.PolicyManager
 
-/** Relatório que o site do guardião mostra (campos em protocol/SPEC.md). */
+/** Relatório que o site do Guardian mostra (campos em protocol/SPEC.md). */
 object RemoteReport {
     private const val MAX_APPS = 50
     private const val MAX_APPROVED = 150
