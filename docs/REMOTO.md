@@ -61,3 +61,11 @@ GUARDIAN_REPO=../guardian ./gradlew :app:testDebugUnitTest         # 52: + integ
 
 **Não validado em aparelho** (sem emulador na nuvem): chave do Keystore com `PURPOSE_SIGN | PURPOSE_AGREE_KEY` e ECDH na One UI 8
 (se recusar, separe em duas chaves e registre a de ECDH no relatório), as telas de pareamento, e o canal em segundo plano com o serviço de guarda.
+
+## Relatório: rótulos e apps aprovados
+
+O relatório enviado ao gateway inclui `labels`, `groups` e `hints` (nomes amigáveis das chaves de configuração, de `ConfigLabels`) e `approvedApps` (até 150 apps, ordenados por rótulo). O site usa isso na aba Regras.
+
+## Capturas de tela (JVM)
+
+`NOTTODAY_SHOTS=<dir> ./gradlew testDebugUnitTest --tests '*ScreenshotTest*'` gera PNGs das telas com Robolectric (tema "Mar e terra"). Sem a variável, o teste não roda.

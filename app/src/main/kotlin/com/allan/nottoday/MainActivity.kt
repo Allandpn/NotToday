@@ -3,6 +3,7 @@ package com.allan.nottoday
 import android.app.Activity
 import android.app.AlertDialog
 import android.os.Bundle
+import android.graphics.Typeface
 import android.os.UserManager
 import android.text.InputType
 import android.view.ViewGroup
@@ -134,7 +135,7 @@ class MainActivity : Activity() {
                 inputType = InputType.TYPE_CLASS_NUMBER
             }.also { content.addView(it) }
         }
-        button("Salvar PIN") {
+        button("Salvar PIN", primary = true) {
             val p = pin.text.toString()
             when {
                 p.length < PinStore.MIN_LENGTH -> toast("Mínimo ${PinStore.MIN_LENGTH} dígitos")
@@ -178,7 +179,7 @@ class MainActivity : Activity() {
             setText(android.os.Build.MODEL ?: "Aparelho")
         }
         content.addView(name)
-        button("Parear") {
+        button("Parear", primary = true) {
             val s = str.text.toString()
             val n = name.text.toString()
             val parsed = try {
@@ -228,13 +229,13 @@ class MainActivity : Activity() {
     /** Pareado e ainda sem PIN: só o guardião (pelo site) pode definir o PIN. Aqui nada é criado. */
     private fun renderAwaitingGuardian(owner: Boolean) {
         title("Aguardando o guardião")
-        text(
-            "Este aparelho está pareado com um guardião remoto. Fingerprint:\n${remote.fingerprint ?: "?"}\n\n" +
-                "Confira por voz com o guardião; ele define o PIN pelo site e envia a ativação.",
-        )
-        text(
+        text("Este aparelho está pareado com um guardião remoto. Leia o fingerprint para ele conferir:")
+        fingerprintBox(remote.fingerprint ?: "?")
+        text("Confira por voz com o guardião; ele define o PIN pelo site e envia a ativação. Aqui nenhum PIN pode ser criado.")
+        cardText(
             "Canal: ${RemoteChannel.status}" + (Diag.lastError?.let { "\nErro: $it" } ?: "") +
-                if (remote.activated) "\nAtivado pelo guardião." else "\nAinda não ativado.",
+                "\n" + (if (pins.isSet) "PIN definido pelo guardião." else "PIN: aguardando o guardião.") +
+                "\n" + (if (remote.activated) "Ativado pelo guardião." else "Ativação: aguardando o guardião."),
         )
         if (!owner) {
             text("Ative o Device Owner só depois que o guardião ativar: adb shell dpm set-device-owner $packageName/.AdminReceiver")
@@ -284,7 +285,7 @@ class MainActivity : Activity() {
             }
             return
         }
-        text(
+        cardText(
             "Pareado. Fingerprint: ${remote.fingerprint ?: "?"}\nGateway: ${remote.gateway}\nCanal: ${RemoteChannel.status}" +
                 (if (remote.activated) "\nAtivado pelo guardião." else "\nAinda não ativado pelo guardião."),
         )
@@ -309,7 +310,7 @@ class MainActivity : Activity() {
             button("Atualizar") { render() }
         } else {
             val pin = pinField("PIN")
-            button("Entrar") {
+            button("Entrar", primary = true) {
                 if (pins.verify(pin.text.toString())) unlocked = true else toast("PIN incorreto")
                 render()
             }
@@ -493,7 +494,7 @@ class MainActivity : Activity() {
         }
         content.addView(delay)
 
-        button("Salvar e aplicar") {
+        button("Salvar e aplicar", primary = true) {
             val old = config.snapshot()
             val new = LinkedHashMap(old)
             switches.forEach { (spec, sw) -> new["r_${spec.key}"] = sw.isChecked.toString() }
@@ -551,10 +552,11 @@ class MainActivity : Activity() {
         if (!owner) return
         val vpn = VpnWatch.isVpnUp(this)
         val active = policy.filterActive()
-        text(
+        cardText(
             "Filtro: ${if (!config.dnsFilterEnabled) "desligado" else if (active) "CONFIRMADO" else "NÃO confirmado"}\n" +
                 "VPN: ${if (vpn) "de pé" else "fora"} · ${Health.lastDetail}" +
                 (Diag.lastError?.let { "\nErro: $it" } ?: ""),
+            accent = active,
         )
         button("Atualizar estado") {
             runAsync {
@@ -693,27 +695,7 @@ class MainActivity : Activity() {
         return if (min >= 60) "${min / 60} h ${min % 60} min" else "$min min"
     }
 
-    private fun labelFor(key: String): String =
-        Catalog.restrictions.firstOrNull { "r_${it.key}" == key }?.label ?: when (key) {
-            "suspend_blocked" -> "Suspender lojas alternativas/instaladores"
-            "browsers_need_filter" -> "Apps marcados só com filtro confirmado"
-            "dns_filter" -> "Filtro ativo"
-            "canary" -> "Domínio-canário"
-            "routed_extra" -> "Apps no filtro"
-            "browsers_exempt" -> "Navegadores fora do filtro"
-            "new_apps_deny" -> "Suspender apps novos"
-            "dev_windows_per_day" -> "Janelas de desenvolvimento por 24 h"
-            "dev_window_seconds" -> "Duração da janela de desenvolvimento (s)"
-            "dev_reboot" -> "Reiniciar ao fim da janela de desenvolvimento"
-            "store_extra" -> "Lojas extras"
-            "chrome_doh_off" -> "Chrome: DNS sobre HTTPS desligado"
-            "chrome_safesearch" -> "Chrome: SafeSearch"
-            "chrome_youtube" -> "Chrome: YouTube restrito (0 desligado, 1 moderado, 2 estrito)"
-            "chrome_incognito_block" -> "Chrome: bloquear modo anônimo"
-            "protected_pkgs" -> "Apps protegidos"
-            Gate.KEY_DELAY -> "Atraso de desbloqueio (min)"
-            else -> key
-        }
+    private fun labelFor(key: String): String = ConfigLabels.label(key)
 
     private fun renderMaintenance(owner: Boolean) {
         val left = maintenance.remainingMs()
@@ -831,25 +813,69 @@ class MainActivity : Activity() {
 
     private fun title(s: String) = content.addView(TextView(this).apply {
         text = s
-        textSize = 24f
-        setPadding(0, 0, 0, dp(8))
+        textSize = 26f
+        setTypeface(typeface, Typeface.BOLD)
+        setTextColor(getColor(R.color.nt_text))
+        setPadding(0, dp(4), 0, dp(10))
     })
 
     private fun section(s: String) = content.addView(TextView(this).apply {
+        text = s.uppercase()
+        textSize = 12f
+        letterSpacing = 0.08f
+        setTypeface(typeface, Typeface.BOLD)
+        setTextColor(getColor(R.color.nt_muted))
+        setPadding(0, dp(24), 0, dp(6))
+    })
+
+    private fun text(s: String) = content.addView(TextView(this).apply {
         text = s
-        textSize = 16f
-        setPadding(0, dp(20), 0, dp(4))
+        setTextColor(getColor(R.color.nt_text))
     })
 
-    private fun text(s: String) = content.addView(TextView(this).apply { text = s })
+    /** Texto num cartão (estado do filtro, guardião remoto…). */
+    private fun cardText(s: String, accent: Boolean = false) = content.addView(
+        TextView(this).apply {
+            text = s
+            setTextColor(getColor(R.color.nt_text))
+            setBackgroundResource(if (accent) R.drawable.card_accent else R.drawable.card_bg)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        },
+        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) },
+    )
 
-    private fun button(label: String, onClick: () -> Unit) = content.addView(Button(this).apply {
-        text = label
-        setOnClickListener { onClick() }
-    })
+    /** O fingerprint do aparelho, grande, para ler em voz alta ao guardião. */
+    private fun fingerprintBox(fp: String) = content.addView(
+        TextView(this).apply {
+            text = fp
+            typeface = Typeface.MONOSPACE
+            textSize = 20f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(getColor(R.color.nt_text))
+            gravity = android.view.Gravity.CENTER
+            setBackgroundResource(R.drawable.card_accent)
+            setPadding(dp(10), dp(18), dp(10), dp(18))
+        },
+        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10); bottomMargin = dp(10) },
+    )
+
+    private fun button(label: String, primary: Boolean = false, onClick: () -> Unit) = content.addView(
+        Button(this).apply {
+            text = label
+            isAllCaps = false
+            setTextColor(getColor(if (primary) R.color.nt_ink else R.color.nt_text))
+            setBackgroundResource(if (primary) R.drawable.btn_primary else R.drawable.btn_secondary)
+            minHeight = dp(48)
+            minimumHeight = dp(48)
+            setOnClickListener { onClick() }
+        },
+        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) },
+    )
 
     private fun pinField(hintText: String) = EditText(this).apply {
         hint = hintText
+        setTextColor(getColor(R.color.nt_text))
+        setHintTextColor(getColor(R.color.nt_muted))
         inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
         content.addView(this, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
     }
@@ -858,12 +884,14 @@ class MainActivity : Activity() {
         val sw = Switch(this).apply {
             text = label
             isChecked = checked
+            setTextColor(getColor(R.color.nt_text))
             setPadding(0, dp(6), 0, dp(6))
         }
         content.addView(sw)
         if (hint != null) content.addView(TextView(this).apply {
             text = hint
             textSize = 12f
+            setTextColor(getColor(R.color.nt_muted))
         })
         return sw
     }

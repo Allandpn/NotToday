@@ -1,4 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#042244</color>
+
+    <!-- Paleta "Mar e terra" (a mesma do site do guardião). -->
+    <color name="nt_bg">#12202A</color>
+    <color name="nt_surface">#1A2E3A</color>
+    <color name="nt_surface2">#223C4A</color>
+    <color name="nt_line">#2F4F60</color>
+    <color name="nt_text">#EEF3F2</color>
+    <color name="nt_muted">#9DB4B8</color>
+    <color name="nt_green">#35B8A8</color>
+    <color name="nt_orange">#F4A261</color>
+    <color name="nt_red">#EE8A70</color>
+    <color name="nt_ink">#12202A</color>
 </resources>

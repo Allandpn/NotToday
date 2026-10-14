@@ -1,7 +1,9 @@
 package com.allan.nottoday.remote
 
+import com.allan.nottoday.Catalog
 import com.allan.nottoday.Change
 import com.allan.nottoday.Config
+import com.allan.nottoday.ConfigLabels
 import com.allan.nottoday.Gate
 import com.allan.nottoday.Pending
 import org.junit.Assert.assertEquals
@@ -98,5 +100,31 @@ class PendingKindTest {
         assertEquals(Pending.Kind.GUARDIAN, back.kind)
         assertEquals("g_bia", back.payload["id"])
         assertTrue(Pending.Kind.entries.size == 4)
+    }
+}
+
+class ConfigLabelsTest {
+    private val keys = Catalog.restrictions.map { "r_${it.key}" } + listOf(
+        "suspend_blocked", "browsers_need_filter", "dns_filter", "canary", "routed_extra", "browsers_exempt", "new_apps_deny",
+        "dev_windows_per_day", "dev_window_seconds", "dev_reboot", "postpone_updates", "store_extra", "chrome_doh_off",
+        "chrome_safesearch", "chrome_youtube", "chrome_incognito_block", "protected_pkgs", Gate.KEY_DELAY,
+    )
+
+    @Test
+    fun everyKnownKeyHasAHumanLabelAndAGroupInTheList() {
+        for (k in keys) {
+            assertTrue("$k sem rótulo", ConfigLabels.label(k) != k)
+            assertTrue("$k com grupo fora da lista", ConfigLabels.group(k) in ConfigLabels.GROUPS)
+        }
+        assertEquals("chave_nova", ConfigLabels.label("chave_nova")) // desconhecida: mostra a própria chave
+    }
+
+    @Test
+    fun describeCoversAllKeysAndKeepsHintsShort() {
+        val d = ConfigLabels.describe(keys)
+        assertEquals(keys.toSet(), d["labels"]!!.keys)
+        assertEquals(keys.toSet(), d["groups"]!!.keys)
+        assertTrue(d["hints"]!!.values.all { it.length <= 200 })
+        assertTrue(d["hints"]!!.isNotEmpty())
     }
 }

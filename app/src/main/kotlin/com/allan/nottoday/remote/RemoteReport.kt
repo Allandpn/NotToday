@@ -2,7 +2,9 @@ package com.allan.nottoday.remote
 
 import android.content.Context
 import com.allan.nottoday.Catalog
+import com.allan.nottoday.Approved
 import com.allan.nottoday.Clocks
+import com.allan.nottoday.ConfigLabels
 import com.allan.nottoday.Config
 import com.allan.nottoday.DevWindow
 import com.allan.nottoday.Health
@@ -16,6 +18,7 @@ import com.allan.nottoday.PolicyManager
 /** Relatório que o site do guardião mostra (campos em protocol/SPEC.md). */
 object RemoteReport {
     private const val MAX_APPS = 50
+    private const val MAX_APPROVED = 150
 
     fun build(context: Context, consumer: Consumer, executed: List<Map<String, Any?>>): Map<String, Any?> {
         val policy = PolicyManager(context)
@@ -43,6 +46,11 @@ object RemoteReport {
             }
         }
         val dev = DevWindow(context)
+        val snapshot = config.snapshot()
+        val approved = Approved(context).all().filter { it != Catalog.TAILSCALE_PKG }
+            .map { mapOf("pkg" to it, "label" to PackageGuard.label(context, it)) }
+            .sortedBy { (it["label"] as String).lowercase() }.take(MAX_APPROVED)
+        val described = ConfigLabels.describe(snapshot.keys)
         return linkedMapOf(
             "kind" to "device",
             "ts" to System.currentTimeMillis() / 1000,
@@ -56,7 +64,11 @@ object RemoteReport {
             "pendingApps" to pendingApps,
             "pending" to pending,
             "windows" to mapOf("maintenanceMs" to Maintenance(context).remainingMs(), "devMs" to dev.remainingMs(), "devUsed" to dev.usedInLast24h()),
-            "snapshot" to config.snapshot(),
+            "snapshot" to snapshot,
+            "labels" to described["labels"],
+            "groups" to described["groups"],
+            "hints" to described["hints"],
+            "approvedApps" to approved,
             "trust" to consumer.trust.guardians.mapValues { (_, g) -> g.creds.keys.sorted() },
             "ctrs" to consumer.lastCtr,
             "executed" to executed.takeLast(50),

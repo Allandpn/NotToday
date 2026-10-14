@@ -1,4 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="AppTheme" parent="android:Theme.DeviceDefault.DayNight" />
+    <!-- Tema escuro "Mar e terra". Os textos passam em contraste 4,5:1 sobre o fundo e os cartões. -->
+    <style name="AppTheme" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/nt_bg</item>
+        <item name="android:colorBackground">@color/nt_bg</item>
+        <item name="android:textColorPrimary">@color/nt_text</item>
+        <item name="android:textColorSecondary">@color/nt_muted</item>
+        <item name="android:textColorHint">@color/nt_muted</item>
+        <item name="android:colorAccent">@color/nt_green</item>
+        <item name="android:colorControlNormal">@color/nt_muted</item>
+        <item name="android:colorControlActivated">@color/nt_green</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:alertDialogTheme">@style/AppDialog</item>
+    </style>
+
+    <style name="AppDialog" parent="android:Theme.DeviceDefault.Dialog.Alert">
+        <item name="android:windowBackground">@color/nt_surface</item>
+        <item name="android:colorBackground">@color/nt_surface</item>
+        <item name="android:textColorPrimary">@color/nt_text</item>
+        <item name="android:textColorSecondary">@color/nt_muted</item>
+        <item name="android:colorAccent">@color/nt_green</item>
+    </style>
 </resources>
