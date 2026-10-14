@@ -33,6 +33,11 @@ class RemoteStore(context: Context) {
         get() = prefs.getLong("last_contact", 0)
         set(v) = prefs.edit().putLong("last_contact", v).apply()
 
+    /** Ids dos pedidos de liberação ainda abertos (separados por vírgula): o canal avisa quando o guardião responde. */
+    var watched: Set<Long>
+        get() = (prefs.getString("watched", "") ?: "").split(",").mapNotNull { it.toLongOrNull() }.toSet()
+        set(v) = prefs.edit().putString("watched", v.joinToString(",")).apply()
+
     val isPaired: Boolean get() = registered && prefs.contains("consumer")
 
     fun consumer(): Consumer? = prefs.getString("consumer", null)?.let {

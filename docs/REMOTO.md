@@ -69,3 +69,9 @@ O relatório enviado ao gateway inclui `labels`, `groups` e `hints` (nomes amig�
 ## Capturas de tela (JVM)
 
 `NOTTODAY_SHOTS=<dir> ./gradlew testDebugUnitTest --tests '*ScreenshotTest*'` gera PNGs das telas com Robolectric (tema "Mar e terra"). Sem a variável, o teste não roda.
+
+## Pedir liberação de domínios
+
+Na tela de bloqueio, **Algo foi bloqueado? Pedir liberação** abre a lista do que o Pi-hole bloqueou para este aparelho nas últimas 24 h (por padrão só as regras próprias; um interruptor mostra também anúncios). A pessoa marca os domínios e toca em **Pedir liberação**, depois em **Enviar link ao guardião** (folha de compartilhar do Android). Não há texto livre: o gateway só aceita domínios que o executor viu bloqueados. O pedido manual (app ou outro assunto) fica escondido atrás de um botão.
+
+O canal consulta os pedidos abertos a cada ciclo e mostra uma notificação local quando o guardião responde (liberado, liberado por tempo ou negado). O pedido pode ser cancelado antes da resposta. O app pede a permissão de notificações ao abrir essa tela (Android 13 ou mais).

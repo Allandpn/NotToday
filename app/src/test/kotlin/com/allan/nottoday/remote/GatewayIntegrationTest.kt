@@ -151,4 +151,45 @@ class GatewayIntegrationTest {
         assertTrue("devia recusar: $e", e is GatewayException && e.status == 401)
         assertFalse(store.consumer() == null)
     }
+
+    @Test
+    fun unblockFlowFromBlockedListToTheGuardianAnswer() {
+        Pairing.register(ctx, sim("pairing"), "Celular", signer, allowInsecure = true)
+        val store = RemoteStore(ctx)
+        val api = GatewayApi(store.gateway!!, signer, allowInsecure = true)
+        val notes = ArrayList<String>()
+        val session = RemoteSession(ctx, store, api, { notes.add(it) }) { soft.private }
+        val un = UnblockApi(api, dev)
+
+        // 1) o Pi-hole bloqueou: o executor informa, o aparelho lista (anúncios ficam de fora por padrão)
+        sim("blocks", "--dev", dev, "--domains", "cdn.video.exemplo.com,api.video.exemplo.com")
+        sim("blocks", "--dev", dev, "--domains", "ads.rastreador.net", "--list")
+        assertEquals(setOf("cdn.video.exemplo.com", "api.video.exemplo.com"), un.blocked(true).map { it.domain }.toSet())
+        assertTrue(un.blocked(false).any { it.domain == "ads.rastreador.net" && !it.own })
+
+        // 2) pedido: só domínios vistos; nada de texto livre
+        val e = runCatching { un.request(listOf("nunca-visto.com")) }.exceptionOrNull()
+        assertTrue("devia recusar: $e", e is GatewayException && e.status == 400)
+        val rid = un.request(listOf("cdn.video.exemplo.com", "api.video.exemplo.com"))!!
+        store.watched = store.watched + rid
+        assertEquals("open", un.requests().single().status)
+        assertEquals(0, session.cycle(0))
+        assertTrue("ainda sem resposta", notes.isEmpty())
+
+        // 3) o guardião libera um e nega o outro: o ciclo seguinte avisa
+        sim("resolve", "--rid", rid.toString(), "--allow", "cdn.video.exemplo.com", "--deny", "api.video.exemplo.com")
+        assertEquals(0, session.cycle(0))
+        assertEquals(1, notes.size)
+        assertTrue(notes[0], "Liberado: cdn.video.exemplo.com" in notes[0] && "Negado: api.video.exemplo.com" in notes[0])
+        assertTrue(store.watched.isEmpty())
+        val states = un.requests().single().items.associate { it.domain to it.state }
+        assertEquals(mapOf("cdn.video.exemplo.com" to "allowed", "api.video.exemplo.com" to "denied"), states)
+        assertEquals(0, session.cycle(0))
+        assertEquals("não avisa duas vezes", 1, notes.size)
+
+        // 4) cancelar um pedido aberto
+        val rid2 = un.request(listOf("api.video.exemplo.com"))!!
+        un.cancel(rid2)
+        assertEquals("cancelled", un.requests().first { it.id == rid2 }.items.single().state)
+    }
 }

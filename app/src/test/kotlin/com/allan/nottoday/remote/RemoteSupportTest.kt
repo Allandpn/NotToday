@@ -128,3 +128,24 @@ class ConfigLabelsTest {
         assertTrue(d["hints"]!!.isNotEmpty())
     }
 }
+
+class UnblockTextTest {
+    private fun item(d: String, st: String, ttl: Long? = null) = RequestItem(d, st, ttl)
+
+    @Test
+    fun answerMentionsAllowedAndDeniedAndNothingForCancelled() {
+        val r = UnblockRequest(1, "done", listOf(item("a.com", "allowed"), item("b.com", "allowed", 3600), item("c.com", "denied")))
+        val msg = UnblockText.answer(r)!!
+        assertTrue(msg, msg.startsWith("Liberado: a.com, b.com. Negado: c.com"))
+        assertEquals(null, UnblockText.answer(UnblockRequest(2, "done", listOf(item("a.com", "cancelled")))))
+        assertEquals("Negado: x.com", UnblockText.answer(UnblockRequest(3, "done", listOf(item("x.com", "denied")))))
+    }
+
+    @Test
+    fun labelsAndDurations() {
+        assertEquals("liberado por 1 h", UnblockText.stateLabel(item("a", "allowed", 3600)))
+        assertEquals("liberado", UnblockText.stateLabel(item("a", "allowed")))
+        assertEquals("1 d", UnblockText.ttl(86400))
+        assertEquals("há 5 min", UnblockText.ago(1000, 700))
+    }
+}

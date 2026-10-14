@@ -11,6 +11,7 @@ class RemoteSession(
     private val app: Context,
     private val store: RemoteStore,
     private val api: GatewayApi,
+    private val notify: (String) -> Unit = { UnblockNotifier.show(app, it) },
     private val privateKey: () -> PrivateKey = { DeviceKey.privateKey() },
 ) {
     private val executed = ArrayList<Map<String, Any?>>()
@@ -24,6 +25,7 @@ class RemoteSession(
 
         val got = api.call("GET", "/v1/devices/$dev/commands?after=${store.after}&wait=$waitS", waitS = waitS)
         store.lastContact = System.currentTimeMillis()
+        checkAnswers(dev)
         val commands = got["commands"] as? List<*> ?: return 0
         if (commands.isEmpty()) return 0
         val runner = RemoteCommands(app, store, consumer, privateKey)
@@ -40,6 +42,24 @@ class RemoteSession(
         }
         lastReport = 0L // relata já o resultado dos comandos
         return n
+    }
+
+    /** Pedidos de liberação em aberto: quando o guardião responde, avisa e para de acompanhar. Falha aqui não derruba o ciclo. */
+    private fun checkAnswers(dev: String) {
+        val watched = store.watched
+        if (watched.isEmpty()) return
+        try {
+            val now = UnblockApi(api, dev).requests().associateBy { it.id }
+            val still = HashSet<Long>()
+            for (id in watched) {
+                val r = now[id]
+                if (r == null || r.status != "open") r?.let { UnblockText.answer(it)?.let(notify) } else still.add(id)
+            }
+            store.watched = still
+        } catch (_: GatewayException) {
+            // tenta de novo no próximo ciclo
+        } catch (_: java.io.IOException) {
+        }
     }
 
     private fun report(consumer: Consumer) {
