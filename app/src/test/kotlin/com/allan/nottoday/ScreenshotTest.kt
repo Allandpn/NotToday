@@ -53,13 +53,21 @@ class ScreenshotTest {
         val w = scroll.width.coerceAtLeast(1)
         child.measure(View.MeasureSpec.makeMeasureSpec(w - scroll.paddingLeft - scroll.paddingRight, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
-        val h = (child.measuredHeight + scroll.paddingTop + scroll.paddingBottom).coerceAtLeast(scroll.height)
+        val bar = views(a.window.decorView).firstOrNull { it.tag == "savebar" && it.visibility == View.VISIBLE }
+        bar?.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        val barH = bar?.measuredHeight ?: 0
+        val h = (child.measuredHeight + scroll.paddingTop + scroll.paddingBottom).coerceAtLeast(scroll.height) + barH
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         c.drawColor(a.getColor(R.color.nt_bg))
         c.translate(scroll.paddingLeft.toFloat(), scroll.paddingTop.toFloat())
         child.layout(0, 0, child.measuredWidth, child.measuredHeight)
         child.draw(c)
+        if (bar != null) { // a barra de salvar fica fixa embaixo, fora da rolagem
+            c.translate(-scroll.paddingLeft.toFloat(), (h - barH - scroll.paddingTop).toFloat())
+            bar.layout(0, 0, w, barH)
+            bar.draw(c)
+        }
         File(dir!!).mkdirs()
         File(dir, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
@@ -99,5 +107,11 @@ class ScreenshotTest {
         views(a.window.decorView).filterIsInstance<EditText>().first { it.hint == "PIN" }.setText("246810")
         button(a, "Entrar").performClick()
         shot(a, "05-configuracoes")
+        button(a, "Restrições").performClick()
+        shot(a, "06-restricoes")
+        views(a.window.decorView).first { it.contentDescription == "Voltar" }.performClick()
+        button(a, "Filtro DNS").performClick()
+        views(a.window.decorView).filterIsInstance<android.widget.Switch>().first().performClick() // muda o rascunho
+        shot(a, "07-filtro-com-alteracao")
     }
 }

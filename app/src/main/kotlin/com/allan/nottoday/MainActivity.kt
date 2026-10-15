@@ -51,6 +51,10 @@ class MainActivity : Activity() {
     private var showAds = false
     private var showManual = false
     private val picked = linkedSetOf<String>()
+    private var page: String? = null                 // subtela das configurações (null = início)
+    private var draft: MutableMap<String, String>? = null  // alterações ainda não salvas
+    private lateinit var saveBarView: LinearLayout
+    private val saveLabel by lazy { TextView(this) }
 
     private val logView by lazy { TextView(this) }
 
@@ -67,7 +71,38 @@ class MainActivity : Activity() {
         remote = RemoteStore(this)
 
         content = SettingsPage(this).apply { setPadding(dp(16), dp(8), dp(16), dp(32)) }
-        val root = ScrollView(this).apply { addView(content) }
+        val scroll = ScrollView(this).apply { addView(content) }
+        saveBarView = LinearLayout(this).apply {
+            tag = "savebar"
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setBackgroundColor(getColor(R.color.nt_surface2))
+            setPadding(dp(20), dp(10), dp(12), dp(10))
+            visibility = View.GONE
+            addView(saveLabel.apply { textSize = 15f; setTextColor(getColor(R.color.nt_text)) },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(Button(this@MainActivity).apply {
+                text = "Descartar"
+                isAllCaps = false
+                setTextColor(getColor(R.color.nt_text))
+                setBackgroundResource(R.drawable.btn_secondary)
+                setOnClickListener { draft = null; render() }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)).apply { marginEnd = dp(8) })
+            addView(Button(this@MainActivity).apply {
+                text = "Salvar e aplicar"
+                isAllCaps = false
+                setTextColor(getColor(R.color.nt_ink))
+                setBackgroundResource(R.drawable.btn_primary)
+                setPadding(dp(16), 0, dp(16), 0)
+                setOnClickListener { saveDraft(policy.isDeviceOwner()) }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
+        }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(getColor(R.color.nt_bg))
+            addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(saveBarView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
         // targetSdk 36 desenha edge-to-edge: afastar o conteúdo das barras do sistema.
         root.setOnApplyWindowInsetsListener { v, insets ->
             val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars())
@@ -91,12 +126,16 @@ class MainActivity : Activity() {
         super.onStop()
         unlocked = false
         showBlocked = false
+        page = null
+        draft = null
         if (!policy.isDeviceOwner()) RemoteChannel.stop()
     }
 
     /** Nunca deixa uma falha de tela impedir o PIN: se algo quebrar, mostra o erro e volta ao bloqueio. */
     private fun render() {
         content.removeAllViews()
+        (content.parent as? ScrollView)?.scrollTo(0, 0)
+        syncBack()
         try {
             val owner = policy.isDeviceOwner()
             val paired = remote.isPaired
@@ -109,6 +148,7 @@ class MainActivity : Activity() {
                 !unlocked -> renderUnlock(owner)
                 else -> renderSettings(owner)
             }
+            refreshSave()
         } catch (e: Exception) {
             content.removeAllViews()
             unlocked = false
@@ -443,7 +483,6 @@ class MainActivity : Activity() {
     }
 
     private fun renderRemoteSettings(owner: Boolean) {
-        section("Guardian remoto")
         if (!remote.isPaired) {
             text("Nenhum Guardian remoto pareado.")
             button("Parear com Guardian remoto") {
@@ -524,194 +563,280 @@ class MainActivity : Activity() {
 
     // --- Configuração --------------------------------------------------------
 
+    // A tela de configurações é como a das Configurações do Android: um início com o estado e as categorias, e uma
+    // subtela por categoria. As mudanças de todas as subtelas vão para um rascunho só; "Salvar e aplicar" manda o
+    // rascunho pelo Gate (endurecer vale na hora, afrouxar espera o atraso), como antes.
+    private val pages = listOf(
+        "restricoes" to "Restrições", "lojas" to "Lojas", "filtro" to "Filtro DNS", "apps" to "Apps novos (Play Store)",
+        "dev" to "Desenvolvimento (ADB curto)", "chrome" to "Chrome", "sistema" to "Sistema", "seguranca" to "Segurança e PIN",
+        "guardian" to "Guardian remoto", "perigo" to "Zona de perigo",
+    )
+
+    private fun draft(): MutableMap<String, String> = draft ?: LinkedHashMap(config.snapshot()).also { draft = it }
+
+    private fun changedKeys(): List<String> {
+        val d = draft ?: return emptyList()
+        val old = config.snapshot()
+        return d.keys.filter { old[it] != d[it] }
+    }
+
     private fun renderSettings(owner: Boolean) {
+        val p = page
+        if (p == null) renderHome(owner) else renderSubpage(p, owner)
+    }
+
+    private fun renderHome(owner: Boolean) {
         title("NotToday")
-        text(
-            if (owner) "Device Owner: ATIVO"
-            else "Device Owner: inativo. Rode no PC:\nadb shell dpm set-device-owner $packageName/.AdminReceiver",
+        cardText(
+            if (owner) "Device Owner ativo\nO NotToday controla as restrições deste aparelho."
+            else "Device Owner inativo\nRode no PC: adb shell dpm set-device-owner $packageName/.AdminReceiver",
+            accent = owner,
         )
         renderStatus(owner)
-
-        val gateOn = owner && config.unlockDelayMin > 0
         renderMaintenance(owner)
         renderPending(owner)
-
-        section("Restrições")
-        val switches = Catalog.restrictions.map { spec ->
-            spec to switchRow(spec.label, config.isRestrictionOn(spec), spec.warning)
-        }
-
-        section("Lojas")
-        val suspend = switchRow(
-            "Suspender lojas alternativas e instaladores de pacote", config.suspendBlocked,
-            "Galaxy Store, GetApps, AppGallery, F-Droid etc. A Play Store continua liberada. Com \"Suspender apps novos\" " +
-                "ligado, esta opção é redundante (o app novo já fica suspenso).",
-        )
-        text("Lojas extras (pacotes separados por vírgula), suspensas junto com as acima.")
-        val storeExtra = EditText(this).apply {
-            setText(config.extraStores.joinToString(", "))
-            inputType = InputType.TYPE_CLASS_TEXT
-        }
-        content.addView(storeExtra)
-
-        section("Filtro (DNS pelo Tailscale)")
-        text(
-            "O Tailscale vira a VPN sempre ativa e leva ao seu servidor DNS filtrante (Pi-hole, AdGuard Home etc., " +
-                "definido como DNS da tailnet) só os apps marcados. Instale o Tailscale e faça " +
-                "login ANTES de ativar o Device Owner. Você liga e desliga o Tailscale no app dele.",
-        )
-        val filterOn = switchRow("Filtro ativo (Tailscale sempre ativo)", config.dnsFilterEnabled)
-        val needFilter = switchRow(
-            "Apps marcados só funcionam com o filtro confirmado", config.browsersNeedFilter,
-            "Sem VPN ou com o canário resolvendo, os apps marcados são suspensos; os demais seguem com internet.",
-        )
-        text("Domínio-canário: um domínio REAL (existente) que o seu servidor DNS mantém bloqueado. Sem ele, os apps marcados ficam suspensos.")
-        val canary = EditText(this).apply {
-            setText(config.canary)
-            hint = "ex.: canario.exemplo.com"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-        }
-        content.addView(canary)
-
-        var extraDraft = config.routedExtra.toSet()
-        var exemptDraft = config.browsersExempt.toSet()
-        val routedSummary = TextView(this)
-        fun refreshSummary() {
-            val browsers = Browsers.installed(this) - exemptDraft
-            routedSummary.text = "No filtro: ${(browsers + extraDraft).distinct().joinToString { PackageGuard.label(this, it) }.ifEmpty { "nenhum app" }}"
-        }
-        refreshSummary()
-        content.addView(routedSummary)
-        button("Escolher apps que passam pelo filtro") {
-            pickApps(extraDraft, exemptDraft) { extra, exempt ->
-                extraDraft = extra
-                exemptDraft = exempt
-                refreshSummary()
-            }
-        }
-
-        section("Apps novos (Play Store)")
-        val newDeny = switchRow(
-            "Suspender apps novos até a aprovação", config.newAppsDeny,
-            "Instalar é livre; o app novo é suspenso logo em seguida e só abre depois que a pessoa de confiança aprova aqui. " +
-                "Navegadores novos entram sozinhos no filtro.",
-        )
-        renderApprovals(owner)
-
-        section("Desenvolvimento (ADB curto)")
-        text(
-            "O PIN de desenvolvedor abre só o ADB, por poucos segundos e poucas vezes ao dia, na tela de bloqueio. " +
-                "Só funciona com a depuração bloqueada acima. Ajustes de limite que aumentam o acesso esperam o atraso.",
-        )
-        button(if (devPins.isSet) "Trocar PIN de desenvolvedor" else "Definir PIN de desenvolvedor") { promptDevPin() }
-        text("Janelas por 24 h:")
-        val devPerDay = EditText(this).apply {
-            setText(config.devWindowsPerDay.toString())
-            inputType = InputType.TYPE_CLASS_NUMBER
-        }
-        content.addView(devPerDay)
-        text("Duração de cada janela (segundos):")
-        val devSeconds = EditText(this).apply {
-            setText(config.devWindowSeconds.toString())
-            inputType = InputType.TYPE_CLASS_NUMBER
-        }
-        content.addView(devSeconds)
-        val devReboot = switchRow(
-            "Reiniciar o aparelho ao fim da janela", config.devReboot,
-            "Mata processos de shell iniciados durante a janela (estilo Shizuku).",
-        )
-
-        section("Chrome (configuração gerenciada)")
-        text("Melhor esforço, confira em chrome://policy. Não vale para outros navegadores.")
-        val chromeDoh = switchRow(
-            "Desligar DNS sobre HTTPS", config.chromeDohOff,
-            "Recomendado: com DoH o Chrome ignora o servidor DNS filtrante. Só vale com o filtro ativo.",
-        )
-        val chromeSafe = switchRow("Forçar SafeSearch do Google", config.chromeSafeSearch)
-        text("YouTube restrito no Chrome:")
-        val chromeYt = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
-                listOf("Desligado", "Moderado", "Estrito"),
-            )
-            setSelection(config.chromeYoutube)
-        }
-        content.addView(chromeYt)
-        val chromeIncog = switchRow(
-            "Bloquear modo anônimo", config.chromeIncognitoBlock,
-            "Opcional: o anônimo não escapa do DNS filtrante, só esconde o histórico.",
-        )
-
-        section("Sistema")
-        val postpone = switchRow(
-            "Adiar atualizações do Android (até 30 dias)", config.postponeUpdates,
-            "Dá tempo de testar o app numa versão nova. Passados 30 dias o sistema instala.",
-        )
-        text("Apps protegidos extras (pacotes separados por vírgula; ex.: AppLock). Confira com `pm list packages`.")
-        val protectedPkgs = EditText(this).apply {
-            setText(config.protectedPackages.joinToString(", "))
-            inputType = InputType.TYPE_CLASS_TEXT
-        }
-        content.addView(protectedPkgs)
-        section("Segurança")
-        text("Atraso para desbloqueios, em horas. Aumentar vale na hora; diminuir também espera o atraso atual.")
-        val delay = EditText(this).apply {
-            setText((config.unlockDelayMin / 60).toString())
-            inputType = InputType.TYPE_CLASS_NUMBER
-        }
-        content.addView(delay)
-
-        button("Salvar e aplicar", primary = true) {
-            val old = config.snapshot()
-            val new = LinkedHashMap(old)
-            switches.forEach { (spec, sw) -> new["r_${spec.key}"] = sw.isChecked.toString() }
-            new["suspend_blocked"] = suspend.isChecked.toString()
-            new["dns_filter"] = filterOn.isChecked.toString()
-            new["browsers_need_filter"] = needFilter.isChecked.toString()
-            new["canary"] = canary.text.toString().trim().lowercase()
-            new["routed_extra"] = extraDraft.sorted().joinToString(",")
-            new["browsers_exempt"] = exemptDraft.sorted().joinToString(",")
-            new["new_apps_deny"] = newDeny.isChecked.toString()
-            new["dev_windows_per_day"] = (devPerDay.text.toString().toIntOrNull() ?: config.devWindowsPerDay).coerceIn(0, 20).toString()
-            new["dev_window_seconds"] = (devSeconds.text.toString().toIntOrNull() ?: config.devWindowSeconds).coerceIn(10, 600).toString()
-            new["dev_reboot"] = devReboot.isChecked.toString()
-            new["postpone_updates"] = postpone.isChecked.toString()
-            new["chrome_doh_off"] = chromeDoh.isChecked.toString()
-            new["chrome_safesearch"] = chromeSafe.isChecked.toString()
-            new["chrome_youtube"] = chromeYt.selectedItemPosition.toString()
-            new["chrome_incognito_block"] = chromeIncog.isChecked.toString()
-            new["store_extra"] = storeExtra.text.toString().split(',', ' ').map { it.trim() }
-                .filter { it.isNotEmpty() }.joinToString(",")
-            new["protected_pkgs"] = protectedPkgs.text.toString().split(',', ' ').map { it.trim() }
-                .filter { it.isNotEmpty() }.joinToString(",")
-            delay.text.toString().toLongOrNull()?.coerceIn(0, 24 * 14)?.let { new[Gate.KEY_DELAY] = (it * 60).toString() }
-
-            // Endurecer vale na hora; afrouxar vira um pedido que só pode ser confirmado depois do atraso.
-            val split = if (gateOn) Gate.split(old, new) else Gate.Split(new.filter { old[it.key] != it.value }, emptyMap())
-            config.applySnapshot(split.immediate)
-            var note = ""
-            if (split.delayed.isNotEmpty()) {
-                pendings.put(Pending.Kind.SETTINGS, split.delayed, config.unlockDelayMin * 60_000L)
-                note = "${split.delayed.size} alteração(ões) que afrouxam a proteção aguardam ${formatDuration(config.unlockDelayMin * 60_000L)}.\n"
-            }
-            runAndShow("Aplicando…", note) { policy.apply() }
-        }
-        button("Trocar PIN") {
-            changingPin = true
-            render()
-        }
-
-        renderRemoteSettings(owner)
-
-        section("Zona de perigo")
-        if (owner) button(if (gateOn) "Pedir remoção do Device Owner" else "Remover Device Owner") {
-            if (gateOn) {
-                pendings.put(Pending.Kind.RELEASE, emptyMap(), config.unlockDelayMin * 60_000L)
+        section("Configurações")
+        for ((key, label) in pages) {
+            if (key == "perigo" && !owner) continue
+            button(label, summary = summaryOf(key)) {
+                page = key
                 render()
-            } else {
-                confirmRelease()
             }
         }
+    }
+
+    private fun summaryOf(key: String): String {
+        val d = draft()
+        fun on(k: String) = d[k] == "true"
+        fun yesNo(k: String) = if (on(k)) "ligado" else "desligado"
+        return when (key) {
+            "restricoes" -> "${Catalog.restrictions.count { on("r_${it.key}") }} de ${Catalog.restrictions.size} ligadas"
+            "lojas" -> "Suspender lojas alternativas: ${yesNo("suspend_blocked")}"
+            "filtro" -> if (on("dns_filter")) "Pelo Tailscale · ligado · canário ${d["canary"].orEmpty().ifEmpty { "não definido" }}" else "Desligado"
+            "apps" -> "Suspender até aprovar: ${yesNo("new_apps_deny")} · ${PackageGuard.pending(this).size} aguardando"
+            "dev" -> "${d["dev_windows_per_day"]} janela(s) por dia de ${d["dev_window_seconds"]} s" +
+                if (devPins.isSet) "" else " · PIN não definido"
+            "chrome" -> "DoH desligado: ${if (on("chrome_doh_off")) "sim" else "não"} · SafeSearch: ${if (on("chrome_safesearch")) "sim" else "não"}"
+            "sistema" -> "Adiar atualizações: ${yesNo("postpone_updates")}"
+            "seguranca" -> "Atraso para afrouxar: ${(d[Gate.KEY_DELAY]?.toLongOrNull() ?: 0) / 60} h"
+            "guardian" -> if (remote.isPaired) "Pareado" + if (remote.activated) " e ativado" else ", aguardando ativação" else "Não pareado"
+            else -> "Remover o Device Owner"
+        }
+    }
+
+    /** Título de subtela com a seta de voltar, como nas Configurações. */
+    private fun subTitle(s: String) = content.addLoose(
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, dp(28), dp(8), dp(12))
+            addView(android.widget.ImageButton(this@MainActivity).apply {
+                setImageResource(R.drawable.ic_back)
+                contentDescription = "Voltar"
+                val tv = android.util.TypedValue()
+                theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true)
+                setBackgroundResource(tv.resourceId)
+                setOnClickListener { goBack() }
+            }, LinearLayout.LayoutParams(dp(48), dp(48)))
+            addView(TextView(this@MainActivity).apply {
+                text = s
+                textSize = 28f
+                setTextColor(getColor(R.color.nt_text))
+                setPadding(dp(8), 0, 0, 0)
+            })
+        },
+        matchWrap,
+    )
+
+    private fun bindSwitch(key: String, label: String, hint: String? = null): Switch =
+        switchRow(label, draft()[key] == "true", hint).apply { setOnCheckedChangeListener { _, on -> draft()[key] = on.toString(); refreshSave() } }
+
+    /** Campo de texto ligado a uma chave do rascunho. `toValue` devolve null quando o texto não serve (fica o valor anterior). */
+    private fun bindField(key: String, shown: String, type: Int, hintText: String? = null, toValue: (String) -> String?): EditText =
+        EditText(this).apply {
+            setText(shown)
+            hint = hintText
+            inputType = type
+            setTextColor(getColor(R.color.nt_text))
+            setHintTextColor(getColor(R.color.nt_muted))
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: android.text.Editable?) {
+                    toValue(s?.toString().orEmpty())?.let { draft()[key] = it }
+                    refreshSave()
+                }
+            })
+            content.addView(this)
+        }
+
+    private fun pkgList(t: String) = t.split(',', ' ').map { it.trim() }.filter { it.isNotEmpty() }.joinToString(",")
+
+    private fun renderSubpage(key: String, owner: Boolean) {
+        subTitle(pages.first { it.first == key }.second)
+        val d = draft()
+        val num = InputType.TYPE_CLASS_NUMBER
+        when (key) {
+            "restricoes" -> Catalog.restrictions.forEach { bindSwitch("r_${it.key}", it.label, it.warning) }
+            "lojas" -> {
+                bindSwitch(
+                    "suspend_blocked", "Suspender lojas alternativas e instaladores de pacote",
+                    "Galaxy Store, GetApps, AppGallery, F-Droid etc. A Play Store continua liberada. Com \"Suspender apps novos\" " +
+                        "ligado, esta opção é redundante (o app novo já fica suspenso).",
+                )
+                section("Lojas extras")
+                text("Pacotes separados por vírgula, suspensos junto com as lojas acima.")
+                bindField("store_extra", d["store_extra"].orEmpty().replace(",", ", "), InputType.TYPE_CLASS_TEXT) { pkgList(it) }
+            }
+            "filtro" -> {
+                text(
+                    "O Tailscale vira a VPN sempre ativa e leva ao seu servidor DNS filtrante (Pi-hole, AdGuard Home etc., " +
+                        "definido como DNS da tailnet) só os apps marcados. Instale o Tailscale e faça " +
+                        "login ANTES de ativar o Device Owner. Você liga e desliga o Tailscale no app dele.",
+                )
+                bindSwitch("dns_filter", "Filtro ativo (Tailscale sempre ativo)")
+                bindSwitch(
+                    "browsers_need_filter", "Apps marcados só funcionam com o filtro confirmado",
+                    "Sem VPN ou com o canário resolvendo, os apps marcados são suspensos; os demais seguem com internet.",
+                )
+                section("Domínio-canário")
+                text("Um domínio REAL (existente) que o seu servidor DNS mantém bloqueado. Sem ele, os apps marcados ficam suspensos.")
+                bindField("canary", d["canary"].orEmpty(), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI, "ex.: canario.exemplo.com") {
+                    it.trim().lowercase()
+                }
+                section("Apps no filtro")
+                val extra = d["routed_extra"].orEmpty().split(',').filter { it.isNotEmpty() }.toSet()
+                val exempt = d["browsers_exempt"].orEmpty().split(',').filter { it.isNotEmpty() }.toSet()
+                val inFilter = ((Browsers.installed(this) - exempt) + extra).distinct().joinToString { PackageGuard.label(this, it) }
+                button("Escolher apps que passam pelo filtro", summary = inFilter.ifEmpty { "Nenhum app" }) {
+                    pickApps(extra, exempt) { e, x ->
+                        draft()["routed_extra"] = e.sorted().joinToString(",")
+                        draft()["browsers_exempt"] = x.sorted().joinToString(",")
+                        render()
+                    }
+                }
+            }
+            "apps" -> {
+                bindSwitch(
+                    "new_apps_deny", "Suspender apps novos até a aprovação",
+                    "Instalar é livre; o app novo é suspenso logo em seguida e só abre depois que a pessoa de confiança aprova aqui. " +
+                        "Navegadores novos entram sozinhos no filtro.",
+                )
+                section("Aprovação")
+                renderApprovals(owner)
+            }
+            "dev" -> {
+                text(
+                    "O PIN de desenvolvedor abre só o ADB, por poucos segundos e poucas vezes ao dia, na tela de bloqueio. " +
+                        "Só funciona com a depuração bloqueada em Restrições. Ajustes de limite que aumentam o acesso esperam o atraso.",
+                )
+                button(if (devPins.isSet) "Trocar PIN de desenvolvedor" else "Definir PIN de desenvolvedor") { promptDevPin() }
+                bindSwitch("dev_reboot", "Reiniciar o aparelho ao fim da janela", "Mata processos de shell iniciados durante a janela (estilo Shizuku).")
+                section("Janelas por 24 h")
+                bindField("dev_windows_per_day", d["dev_windows_per_day"].orEmpty(), num) { it.toIntOrNull()?.coerceIn(0, 20)?.toString() }
+                section("Duração de cada janela (segundos)")
+                bindField("dev_window_seconds", d["dev_window_seconds"].orEmpty(), num) { it.toIntOrNull()?.coerceIn(10, 600)?.toString() }
+            }
+            "chrome" -> {
+                text("Configuração gerenciada do Chrome. Melhor esforço: confira em chrome://policy. Não vale para outros navegadores.")
+                bindSwitch(
+                    "chrome_doh_off", "Desligar DNS sobre HTTPS",
+                    "Recomendado: com DoH o Chrome ignora o servidor DNS filtrante. Só vale com o filtro ativo.",
+                )
+                bindSwitch("chrome_safesearch", "Forçar SafeSearch do Google")
+                bindSwitch("chrome_incognito_block", "Bloquear modo anônimo", "Opcional: o anônimo não escapa do DNS filtrante, só esconde o histórico.")
+                section("YouTube restrito no Chrome")
+                content.addView(Spinner(this).apply {
+                    adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("Desligado", "Moderado", "Estrito"))
+                    setSelection(d["chrome_youtube"]?.toIntOrNull() ?: 0)
+                    onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                        override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                            draft()["chrome_youtube"] = position.toString()
+                            refreshSave()
+                        }
+                        override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+                    }
+                })
+            }
+            "sistema" -> {
+                bindSwitch("postpone_updates", "Adiar atualizações do Android (até 30 dias)", "Dá tempo de testar o app numa versão nova. Passados 30 dias o sistema instala.")
+                section("Apps protegidos extras")
+                text("Pacotes separados por vírgula (ex.: AppLock). Confira com `pm list packages`.")
+                bindField("protected_pkgs", d["protected_pkgs"].orEmpty().replace(",", ", "), InputType.TYPE_CLASS_TEXT) { pkgList(it) }
+            }
+            "seguranca" -> {
+                section("Atraso para desbloqueios (horas)")
+                text("Aumentar vale na hora; diminuir também espera o atraso atual.")
+                bindField(Gate.KEY_DELAY, ((d[Gate.KEY_DELAY]?.toLongOrNull() ?: 0) / 60).toString(), num) {
+                    it.toLongOrNull()?.coerceIn(0, 24 * 14)?.let { h -> (h * 60).toString() }
+                }
+                section("PIN")
+                button("Trocar PIN", summary = "O PIN da pessoa de confiança") {
+                    changingPin = true
+                    render()
+                }
+            }
+            "guardian" -> renderRemoteSettings(owner)
+            "perigo" -> {
+                val gateOn = owner && config.unlockDelayMin > 0
+                text("Remover o Device Owner desliga todas as proteções deste app." + if (gateOn) " Vira um pedido que espera o atraso." else "")
+                if (owner) button(if (gateOn) "Pedir remoção do Device Owner" else "Remover Device Owner") {
+                    if (gateOn) {
+                        pendings.put(Pending.Kind.RELEASE, emptyMap(), config.unlockDelayMin * 60_000L)
+                        page = null
+                        render()
+                    } else {
+                        confirmRelease()
+                    }
+                }
+            }
+        }
+    }
+
+    /** Barra fixa embaixo: aparece assim que o rascunho muda, em qualquer subtela das configurações. */
+    private fun refreshSave() {
+        val n = if (unlocked && !changingPin) changedKeys().size else 0
+        saveBarView.visibility = if (n > 0) View.VISIBLE else View.GONE
+        saveLabel.text = "$n alteração${if (n > 1) "ões" else ""} não salva${if (n > 1) "s" else ""}"
+    }
+
+    private fun saveDraft(owner: Boolean) {
+        val old = config.snapshot()
+        val new = LinkedHashMap(old).apply { putAll(draft()) }
+        val gateOn = owner && config.unlockDelayMin > 0
+        // Endurecer vale na hora; afrouxar vira um pedido que só pode ser confirmado depois do atraso.
+        val split = if (gateOn) Gate.split(old, new) else Gate.Split(new.filter { old[it.key] != it.value }, emptyMap())
+        config.applySnapshot(split.immediate)
+        var note = ""
+        if (split.delayed.isNotEmpty()) {
+            pendings.put(Pending.Kind.SETTINGS, split.delayed, config.unlockDelayMin * 60_000L)
+            note = "${split.delayed.size} alteração(ões) que afrouxam a proteção aguardam ${formatDuration(config.unlockDelayMin * 60_000L)}.\n"
+        }
+        draft = null
+        render()
+        runAndShow("Aplicando…", note) { policy.apply() }
+    }
+
+    /** Voltar da subtela (seta ou gesto do sistema). */
+    private fun goBack() {
+        when {
+            page != null -> page = null
+            showBlocked -> showBlocked = false
+            pairing -> pairing = false
+            else -> return
+        }
+        render()
+    }
+
+    private val backCallback = android.window.OnBackInvokedCallback { goBack() }
+    private var backRegistered = false
+
+    private fun syncBack() {
+        val want = (page != null && unlocked) || showBlocked || pairing
+        if (want == backRegistered) return
+        if (want) onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, backCallback)
+        else onBackInvokedDispatcher.unregisterOnBackInvokedCallback(backCallback)
+        backRegistered = want
     }
 
     /** Estado do filtro: VPN, canário e erro recente. */
