@@ -13,7 +13,8 @@
 param(
     [string]$Serial,
     [switch]$SetOwner,
-    [switch]$SkipInstall
+    [switch]$SkipInstall,
+    [switch]$NewKeystore   # so na PRIMEIRA instalacao; as atualizacoes usam a chave que a pessoa de confianca guarda
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,6 +40,11 @@ if (-not $keytool) { Fail "keytool nao encontrado (instale um JDK ou ajuste o PA
 
 # --- keystore (criado uma vez; FACA BACKUP FORA DO REPOSITORIO) -----------------
 $props = Join-Path $root 'keystore.properties'
+if (-not (Test-Path $props) -and -not $NewKeystore) {
+    Fail ("keystore.properties nao encontrado. Para ATUALIZAR um app ja instalado, a pessoa de confianca coloca aqui o keystore " +
+        "original (keystore\release.jks + keystore.properties) e apaga depois. Uma chave nova nao atualiza o app instalado. " +
+        "So use -NewKeystore na primeira instalacao de um aparelho novo.")
+}
 if (-not (Test-Path $props)) {
     New-Item -ItemType Directory -Force (Join-Path $root 'keystore') | Out-Null
     $bytes = New-Object byte[] 24

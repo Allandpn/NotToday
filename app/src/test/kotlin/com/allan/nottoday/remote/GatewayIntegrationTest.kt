@@ -44,7 +44,7 @@ class GatewayIntegrationTest {
     private val dev get() = DevAuth.deviceId(signer.spki())
 
     private fun builder(vararg args: String) = ProcessBuilder(listOf("python3", "$repo/tests/guardian_sim.py") + args).apply {
-        environment()["PYTHONPATH"] = "$repo/src:$repo/tests"
+        environment()["PYTHONPATH"] = "$repo/src${File.pathSeparator}$repo/tests"
         redirectErrorStream(true)
     }
 
