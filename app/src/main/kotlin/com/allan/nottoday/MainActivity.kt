@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.graphics.Typeface
 import android.os.UserManager
 import android.text.InputType
+import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -42,7 +43,7 @@ class MainActivity : Activity() {
     private lateinit var devWindow: DevWindow
     private lateinit var approved: Approved
     private lateinit var remote: RemoteStore
-    private lateinit var content: LinearLayout
+    private lateinit var content: SettingsPage
     private var unlocked = false
     private var changingPin = false
     private var pairing = false
@@ -65,11 +66,7 @@ class MainActivity : Activity() {
         approved = Approved(this)
         remote = RemoteStore(this)
 
-        content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val pad = dp(16)
-            setPadding(pad, pad, pad, pad)
-        }
+        content = SettingsPage(this).apply { setPadding(dp(16), dp(8), dp(16), dp(32)) }
         val root = ScrollView(this).apply { addView(content) }
         // targetSdk 36 desenha edge-to-edge: afastar o conteúdo das barras do sistema.
         root.setOnApplyWindowInsetsListener { v, insets ->
@@ -261,7 +258,7 @@ class MainActivity : Activity() {
     private fun renderRequestToGuardian() {
         if (!remote.isPaired) return
         section("Pedir ao guardião")
-        button("Algo foi bloqueado? Pedir liberação", primary = true) {
+        button("Algo foi bloqueado? Pedir liberação", summary = "Mostra o que o filtro bloqueou e manda o pedido ao guardião") {
             showBlocked = true
             render()
         }
@@ -981,41 +978,68 @@ class MainActivity : Activity() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    private fun title(s: String) = content.addView(TextView(this).apply {
-        text = s
-        textSize = 26f
-        setTypeface(typeface, Typeface.BOLD)
-        setTextColor(getColor(R.color.nt_text))
-        setPadding(0, dp(4), 0, dp(10))
-    })
+    private val matchWrap get() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
 
-    private fun section(s: String) = content.addView(TextView(this).apply {
-        text = s.uppercase()
-        textSize = 12f
-        letterSpacing = 0.08f
-        setTypeface(typeface, Typeface.BOLD)
-        setTextColor(getColor(R.color.nt_muted))
-        setPadding(0, dp(24), 0, dp(6))
-    })
+    /** Fundo com o efeito de toque do sistema (o mesmo das Configurações). */
+    private fun View.touchable() {
+        val tv = android.util.TypedValue()
+        theme.resolveAttribute(android.R.attr.selectableItemBackground, tv, true)
+        setBackgroundResource(tv.resourceId)
+        isClickable = true
+        isFocusable = true
+    }
 
-    private fun text(s: String) = content.addView(TextView(this).apply {
-        text = s
-        setTextColor(getColor(R.color.nt_text))
-    })
-
-    /** Texto num cartão (estado do filtro, Guardian remoto…). */
-    private fun cardText(s: String, accent: Boolean = false) = content.addView(
+    /** Título grande da tela, como o da barra das Configurações expandida. */
+    private fun title(s: String) = content.addLoose(
         TextView(this).apply {
             text = s
+            textSize = 32f
             setTextColor(getColor(R.color.nt_text))
-            setBackgroundResource(if (accent) R.drawable.card_accent else R.drawable.card_bg)
-            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setPadding(dp(8), dp(40), dp(8), dp(12))
         },
-        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) },
+        matchWrap,
+    )
+
+    /** Nova categoria (nome em destaque e um grupo novo). */
+    private fun section(s: String) = content.startGroup(s)
+
+    /** Texto explicativo dentro do grupo, no tom secundário. */
+    private fun text(s: String) = content.addView(TextView(this).apply {
+        tag = SettingsPage.ROW
+        text = s
+        textSize = 14f
+        setLineSpacing(0f, 1.15f)
+        setTextColor(getColor(R.color.nt_muted))
+        setPadding(dp(16), dp(14), dp(16), dp(14))
+    })
+
+    /** Item de duas linhas (título e resumo), sem ação. */
+    private fun twoLine(titleText: String, summary: String?, titleColor: Int = R.color.nt_text): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(TextView(this@MainActivity).apply {
+            text = titleText
+            textSize = 17f
+            setTextColor(getColor(titleColor))
+        })
+        if (!summary.isNullOrEmpty()) addView(TextView(this@MainActivity).apply {
+            text = summary
+            textSize = 14f
+            setLineSpacing(0f, 1.1f)
+            setTextColor(getColor(R.color.nt_muted))
+            setPadding(0, dp(2), 0, 0)
+        })
+    }
+
+    /** Estado (filtro, Guardian remoto…): a primeira linha é o título, o resto vira o resumo. */
+    private fun cardText(s: String, accent: Boolean = false) = content.addView(
+        twoLine(s.substringBefore('\n'), s.substringAfter('\n', "").ifEmpty { null }, if (accent) R.color.nt_green else R.color.nt_text).apply {
+            tag = SettingsPage.ROW
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        },
     )
 
     /** O fingerprint do aparelho, grande, para ler em voz alta ao guardião. */
-    private fun fingerprintBox(fp: String) = content.addView(
+    private fun fingerprintBox(fp: String) = content.addLoose(
         TextView(this).apply {
             text = fp
             typeface = Typeface.MONOSPACE
@@ -1026,21 +1050,41 @@ class MainActivity : Activity() {
             setBackgroundResource(R.drawable.card_accent)
             setPadding(dp(10), dp(18), dp(10), dp(18))
         },
-        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10); bottomMargin = dp(10) },
+        matchWrap.apply { topMargin = dp(12); bottomMargin = dp(4) },
     )
 
-    private fun button(label: String, primary: Boolean = false, onClick: () -> Unit) = content.addView(
-        Button(this).apply {
-            text = label
-            isAllCaps = false
-            setTextColor(getColor(if (primary) R.color.nt_ink else R.color.nt_text))
-            setBackgroundResource(if (primary) R.drawable.btn_primary else R.drawable.btn_secondary)
-            minHeight = dp(48)
-            minimumHeight = dp(48)
-            setOnClickListener { onClick() }
-        },
-        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) },
-    )
+    /**
+     * Ação. A principal da tela (Salvar, Entrar…) é um botão cheio fora dos grupos; as demais são itens tocáveis do grupo,
+     * como "Revogar autorizações de depuração USB" nas Opções do desenvolvedor.
+     */
+    private fun button(label: String, primary: Boolean = false, summary: String? = null, onClick: () -> Unit) {
+        if (primary) {
+            content.addLoose(
+                Button(this).apply {
+                    text = label
+                    isAllCaps = false
+                    textSize = 16f
+                    setTextColor(getColor(R.color.nt_ink))
+                    setBackgroundResource(R.drawable.btn_primary)
+                    minHeight = dp(52)
+                    minimumHeight = dp(52)
+                    setOnClickListener { onClick() }
+                },
+                matchWrap.apply { topMargin = dp(16); bottomMargin = dp(4) },
+            )
+            return
+        }
+        content.addView(
+            twoLine(label, summary).apply {
+                tag = SettingsPage.ROW
+                minimumHeight = dp(56)
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(dp(16), dp(16), dp(16), dp(16))
+                touchable()
+                setOnClickListener { onClick() }
+            },
+        )
+    }
 
     private fun pinField(hintText: String) = EditText(this).apply {
         hint = hintText
@@ -1050,19 +1094,24 @@ class MainActivity : Activity() {
         content.addView(this, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 
+    /** Item com interruptor à direita; tocar em qualquer parte da linha liga ou desliga. */
     private fun switchRow(label: String, checked: Boolean, hint: String? = null): Switch {
         val sw = Switch(this).apply {
-            text = label
             isChecked = checked
-            setTextColor(getColor(R.color.nt_text))
-            setPadding(0, dp(6), 0, dp(6))
+            contentDescription = label
         }
-        content.addView(sw)
-        if (hint != null) content.addView(TextView(this).apply {
-            text = hint
-            textSize = 12f
-            setTextColor(getColor(R.color.nt_muted))
-        })
+        val row = LinearLayout(this).apply {
+            tag = SettingsPage.ROW
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            minimumHeight = dp(64)
+            setPadding(dp(16), dp(14), dp(12), dp(14))
+            touchable()
+            setOnClickListener { sw.toggle() }
+            addView(twoLine(label, hint), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(16) })
+            addView(sw)
+        }
+        content.addView(row)
         return sw
     }
 

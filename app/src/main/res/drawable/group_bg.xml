@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Grupo de itens, como nas Configurações do Android: fundo um tom acima, cantos bem arredondados, sem borda. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/nt_surface" />
+    <corners android:radius="24dp" />
+</shape>

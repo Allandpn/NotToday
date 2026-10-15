@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.EditText
 import android.widget.ScrollView
 import com.allan.nottoday.remote.Consumer
@@ -39,7 +38,13 @@ class ScreenshotTest {
         return out
     }
 
-    private fun button(a: Activity, text: String) = views(a.window.decorView).filterIsInstance<Button>().first { it.text.toString() == text }
+    /** Botão cheio ou item tocável do grupo com esse texto. */
+    private fun button(a: Activity, text: String): View {
+        val t = views(a.window.decorView).filterIsInstance<android.widget.TextView>().first { it.text.toString() == text }
+        var v: View = t
+        while (!v.isClickable) v = v.parent as View
+        return v
+    }
 
     private fun shot(a: Activity, name: String) {
         shadowOf(android.os.Looper.getMainLooper()).idle()
