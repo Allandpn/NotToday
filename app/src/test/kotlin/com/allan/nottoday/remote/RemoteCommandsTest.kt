@@ -261,14 +261,14 @@ class RemoteCommandsTest {
             "activate" to emptyMap(), "cancel" to mapOf("kind" to "SETTINGS"), "remove_guardian" to mapOf("id" to "g_bia"))) {
             val r = send(t, a, by = "g_dora", key = dora, ctrOverride = ++n)
             assertFalse(t, r.ok)
-            assertTrue(r.msg, r.msg.contains("guardião de domínios"))
+            assertTrue(r.msg, r.msg.contains("guardião"))
         }
         val dora2 = FakePasskey(rp, origin)
         assertTrue(send("add_credential", mapOf("id" to "g_dora", "cred" to dora2.credIdB64, "spki" to dora2.spkiB64), by = "g_dora", key = dora, ctrOverride = ++n).ok)
         assertFalse(send("add_credential", mapOf("id" to "g_ana", "cred" to dora2.credIdB64, "spki" to dora2.spkiB64), by = "g_dora", key = dora, ctrOverride = ++n).ok)
-        // a assinatura de um guardião de domínios não conta como o segundo administrador
+        // a assinatura de um guardião não conta como o segundo guardião-mor
         assertFalse(send("remove_guardian", mapOf("id" to "g_bia"), extra = listOf("g_dora" to dora)).ok)
-        // remover um guardião de domínios vale na hora, mesmo com Device Owner
+        // remover um guardião vale na hora, mesmo com Device Owner
         val r = send("remove_guardian", mapOf("id" to "g_dora"), extra = listOf("g_bia" to bia))
         assertTrue(r.msg, r.ok)
         assertFalse("g_dora" in store.consumer()!!.trust.guardians)

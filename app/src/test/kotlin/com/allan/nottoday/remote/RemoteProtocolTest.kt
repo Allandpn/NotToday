@@ -117,7 +117,7 @@ class RemoteProtocolTest {
         assertThrows(CommandException::class.java) { again.applyTrust(cmd("add_guardian", mapOf("id" to "g_cris", "name" to "x", "cred" to "c", "spki" to "s"))) }
         again.applyTrust(cmd("remove_guardian", mapOf("id" to "g_cris")))
         again.applyTrust(cmd("remove_guardian", mapOf("id" to "g_bia")))
-        assertThrows(CommandException::class.java) { again.applyTrust(cmd("remove_guardian", mapOf("id" to "g_ana"))) } // último administrador
+        assertThrows(CommandException::class.java) { again.applyTrust(cmd("remove_guardian", mapOf("id" to "g_ana"))) } // último guardião-mor
         assertThrows(CommandException::class.java) { again.applyTrust(cmd("approve_app", emptyMap())) }
     }
 

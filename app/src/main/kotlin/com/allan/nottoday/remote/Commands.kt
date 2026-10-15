@@ -3,7 +3,7 @@ package com.allan.nottoday.remote
 /** Comandos assinados pelos guardiões e o estado de confiança do aparelho. Espelha src/guardian/protocol/commands.py. */
 class CommandException(message: String) : Exception(message)
 
-/** `role`: "admin" ou "domains" (veja docs/PAPEIS.md no guardian). Pareamentos antigos, sem papel, são de administradores. */
+/** `role`: "admin" ou "domains" (veja docs/PAPEIS.md no guardian). Pareamentos antigos, sem papel, são de guardiões-mor. */
 class Guardian(val name: String, val creds: MutableMap<String, String> = LinkedHashMap(), val role: String = Commands.ROLE_ADMIN)
 
 class Trust(val rpId: String, val origin: String, val guardians: MutableMap<String, Guardian> = LinkedHashMap()) {
@@ -96,18 +96,18 @@ object Commands {
         return signers
     }
 
-    /** Quantos administradores precisam assinar. */
+    /** Quantos guardiões-mor precisam assinar. */
     fun requiredSigners(trust: Trust, type: String): Int = if (type in TWO_SIG_TYPES && trust.admins().size >= 2) 2 else 1
 
-    /** O autor pode mandar este comando? Guardião de domínios: só domínios e passkey nova para si mesmo. */
+    /** O autor pode mandar este comando? Guardião: só domínios e passkey nova para si mesmo. */
     fun authorize(trust: Trust, cmd: Command, signers: Set<String>) {
         val author = trust.guardians[cmd.guardian] ?: throw CommandException("autor desconhecido")
         if (cmd.type in DOMAIN_TYPES) return
         if (author.role != ROLE_ADMIN) {
             if (cmd.type == T_ADD_CREDENTIAL && cmd.args["id"] == cmd.guardian) return
-            throw CommandException("o guardião de domínios não pode mandar este comando")
+            throw CommandException("o guardião não pode mandar este comando")
         }
-        if ((signers intersect trust.admins()).size < requiredSigners(trust, cmd.type)) throw CommandException("faltam assinaturas de outro administrador")
+        if ((signers intersect trust.admins()).size < requiredSigners(trust, cmd.type)) throw CommandException("faltam assinaturas de outro guardião-mor")
     }
 
     /** Criptografia e quórum. Contador e destino são conferidos pelo [Consumer]. */
@@ -151,7 +151,7 @@ class Consumer(val dev: String, val trust: Trust, val lastCtr: MutableMap<String
             Commands.T_REMOVE_GUARDIAN -> {
                 val id = s("id")
                 if (id !in trust.guardians) throw CommandException("guardião inexistente")
-                if (trust.admins() == setOf(id)) throw CommandException("não remove o último administrador")
+                if (trust.admins() == setOf(id)) throw CommandException("não remove o último guardião-mor")
                 trust.guardians.remove(id)
                 lastCtr.remove(id)
             }

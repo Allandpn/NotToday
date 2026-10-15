@@ -31,7 +31,7 @@ num emulador** (AVD "Google APIs", sem contas, `adb install` do mesmo APK de rel
 | 24 | `reboot()` e `ADB_ENABLED` via `setGlobalSetting` funcionam no emulador (AOSP); na One UI 8 não foram testados. No emulador o adbd respondeu ~8–10 s durante o reinício da janela de dev. | Meça no Tab S8 (`adb devices` em laço durante o reinício). Veja docs/EMULATOR-TESTS.md. |
 
 | 25 | **Pareado com Guardian remoto, sem PIN e o guardião nunca define o PIN** (ou o gateway fica fora do ar para sempre). Nenhum PIN local pode ser criado e, com o Device Owner ativo, só o reset de fábrica sai. | Pareie e deixe o guardião definir o PIN (`set_pin`) **antes** do `set-device-owner`. Antes do Device Owner dá para "Desfazer o pareamento" na própria tela. |
-| 26 | O administrador perde todas as passkeys (a conta Google/Apple dele também) ou some. | O administrador cadastra 2+ passkeys (o site avisa até haver uma chave de reserva); o PIN local presencial continua valendo; sem ele, reset de fábrica. Guardiões de domínios não administram. |
+| 26 | O guardião-mor perde todas as passkeys (a conta Google/Apple dele também) ou some. | O guardião-mor cadastra 2+ passkeys (o site avisa até haver uma chave de reserva); o PIN local presencial continua valendo; sem ele, reset de fábrica. Guardiões de domínios não administram. |
 | 27 | Gateway comprometido ou indisponível. | Não forja comandos (cada um é assinado por passkey) e o aparelho continua protegido; o que se perde é a capacidade de mudar algo remotamente. O PIN local segue funcionando. Veja `docs/REMOTO.md`. |
 | 28 | Relógio do aparelho fora de ±5 min do gateway: as requisições assinadas são recusadas (401). | A política liga hora automática; o canal volta sozinho quando o relógio se corrige. |
 
