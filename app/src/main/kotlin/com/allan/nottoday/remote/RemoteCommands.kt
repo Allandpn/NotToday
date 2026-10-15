@@ -202,9 +202,10 @@ class RemoteCommands(
 
     private fun removeGuardian(cmd: Command): String {
         val id = cmd.args["id"] as? String ?: throw CommandException("id ausente")
-        if (id !in consumer.trust.guardians) throw CommandException("guardião inexistente")
-        if (consumer.trust.guardians.size <= 1) throw CommandException("não remove o último guardião")
-        if (!gateOn()) {
+        val target = consumer.trust.guardians[id] ?: throw CommandException("guardião inexistente")
+        if (consumer.trust.admins() == setOf(id)) throw CommandException("não remove o último administrador")
+        // Tirar um guardião de domínios só reduz quem manda: vale na hora. Tirar um administrador passa pelo atraso.
+        if (!gateOn() || target.role != Commands.ROLE_ADMIN) {
             consumer.applyTrust(cmd)
             store.saveConsumer(consumer)
             return "guardião removido: $id"

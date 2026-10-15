@@ -240,13 +240,39 @@ class RemoteCommandsTest {
     @Test
     fun trustGrowsByAddGuardianAndAddCredential() {
         val cris = FakePasskey(rp, origin)
-        assertTrue(send("add_guardian", mapOf("id" to "g_cris", "name" to "Cris", "cred" to cris.credIdB64, "spki" to cris.spkiB64)).ok)
+        assertTrue(send("add_guardian", mapOf("id" to "g_cris", "name" to "Cris", "cred" to cris.credIdB64, "spki" to cris.spkiB64, "role" to "admin")).ok)
         val cris2 = FakePasskey(rp, origin)
         assertTrue(send("add_credential", mapOf("id" to "g_cris", "cred" to cris2.credIdB64, "spki" to cris2.spkiB64)).ok)
         assertEquals(2, store.consumer()!!.trust.guardians["g_cris"]!!.creds.size)
         // o novo guardião já consegue assinar
         assertTrue(send("approve_app", mapOf("pkg" to "com.x"), by = "g_cris", key = cris2, ctrOverride = 1).ok)
-        assertFalse(send("add_guardian", mapOf("id" to "g_cris", "name" to "outra", "cred" to "c", "spki" to "s")).ok) // já existe
+        assertFalse(send("add_guardian", mapOf("id" to "g_cris", "name" to "outra", "cred" to "c", "spki" to "s", "role" to "admin")).ok) // já existe
+    }
+
+    @Test
+    fun domainGuardianCannotTouchTheDeviceAndLeavesAtOnce() {
+        becomeOwner()
+        val dora = FakePasskey(rp, origin)
+        assertFalse(send("add_guardian", mapOf("id" to "g_dora", "name" to "Dora", "cred" to dora.credIdB64, "spki" to dora.spkiB64)).ok) // sem papel
+        assertTrue(send("add_guardian", mapOf("id" to "g_dora", "name" to "Dora", "cred" to dora.credIdB64, "spki" to dora.spkiB64, "role" to "domains")).ok)
+        assertEquals("domains", store.consumer()!!.trust.guardians["g_dora"]!!.role)
+        var n = 0L
+        for ((t, a) in listOf("approve_app" to mapOf("pkg" to "com.x"), "set_config" to mapOf("patch" to emptyMap<String, Any?>()),
+            "activate" to emptyMap(), "cancel" to mapOf("kind" to "SETTINGS"), "remove_guardian" to mapOf("id" to "g_bia"))) {
+            val r = send(t, a, by = "g_dora", key = dora, ctrOverride = ++n)
+            assertFalse(t, r.ok)
+            assertTrue(r.msg, r.msg.contains("guardião de domínios"))
+        }
+        val dora2 = FakePasskey(rp, origin)
+        assertTrue(send("add_credential", mapOf("id" to "g_dora", "cred" to dora2.credIdB64, "spki" to dora2.spkiB64), by = "g_dora", key = dora, ctrOverride = ++n).ok)
+        assertFalse(send("add_credential", mapOf("id" to "g_ana", "cred" to dora2.credIdB64, "spki" to dora2.spkiB64), by = "g_dora", key = dora, ctrOverride = ++n).ok)
+        // a assinatura de um guardião de domínios não conta como o segundo administrador
+        assertFalse(send("remove_guardian", mapOf("id" to "g_bia"), extra = listOf("g_dora" to dora)).ok)
+        // remover um guardião de domínios vale na hora, mesmo com Device Owner
+        val r = send("remove_guardian", mapOf("id" to "g_dora"), extra = listOf("g_bia" to bia))
+        assertTrue(r.msg, r.ok)
+        assertFalse("g_dora" in store.consumer()!!.trust.guardians)
+        assertNull(PendingStore(ctx).get(Pending.Kind.GUARDIAN))
     }
 
     @Test

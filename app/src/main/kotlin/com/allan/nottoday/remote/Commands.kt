@@ -3,12 +3,15 @@ package com.allan.nottoday.remote
 /** Comandos assinados pelos guardiões e o estado de confiança do aparelho. Espelha src/guardian/protocol/commands.py. */
 class CommandException(message: String) : Exception(message)
 
-class Guardian(val name: String, val creds: MutableMap<String, String> = LinkedHashMap())
+/** `role`: "admin" ou "domains" (veja docs/PAPEIS.md no guardian). Pareamentos antigos, sem papel, são de administradores. */
+class Guardian(val name: String, val creds: MutableMap<String, String> = LinkedHashMap(), val role: String = Commands.ROLE_ADMIN)
 
 class Trust(val rpId: String, val origin: String, val guardians: MutableMap<String, Guardian> = LinkedHashMap()) {
+    fun admins(): Set<String> = guardians.filterValues { it.role == Commands.ROLE_ADMIN }.keys
+
     fun toJson(): Map<String, Any?> = linkedMapOf(
         "rp_id" to rpId, "origin" to origin,
-        "guardians" to guardians.mapValues { (_, g) -> linkedMapOf("name" to g.name, "creds" to g.creds) },
+        "guardians" to guardians.mapValues { (_, g) -> linkedMapOf("name" to g.name, "creds" to g.creds, "role" to g.role) },
     )
 
     companion object {
@@ -19,7 +22,7 @@ class Trust(val rpId: String, val origin: String, val guardians: MutableMap<Stri
                 val m = v as? Map<String, Any?> ?: throw CommandException("guardião inválido")
                 val creds = LinkedHashMap<String, String>()
                 for ((c, s) in (m["creds"] as? Map<String, Any?> ?: emptyMap())) creds[c] = s as? String ?: throw CommandException("credencial inválida")
-                gs[id] = Guardian(m["name"] as? String ?: "", creds)
+                gs[id] = Guardian(m["name"] as? String ?: "", creds, Commands.role(m["role"] ?: Commands.ROLE_ADMIN))
             }
             return Trust(
                 d["rp_id"] as? String ?: throw CommandException("rp_id ausente"),
@@ -41,6 +44,12 @@ object Commands {
     const val T_REMOVE_GUARDIAN = "remove_guardian"
     val TRUST_TYPES = setOf(T_ADD_GUARDIAN, T_ADD_CREDENTIAL, T_REMOVE_GUARDIAN)
     val TWO_SIG_TYPES = setOf(T_REMOVE_GUARDIAN)
+    const val ROLE_ADMIN = "admin"
+    const val ROLE_DOMAINS = "domains"
+    val ROLES = setOf(ROLE_ADMIN, ROLE_DOMAINS)
+    val DOMAIN_TYPES = setOf("pihole_allow", "pihole_deny", "pihole_remove", "pihole_batch")
+
+    fun role(r: Any?): String = (r as? String)?.takeIf { it in ROLES } ?: throw CommandException("papel inválido")
 
     fun challengeOf(payload: ByteArray): ByteArray = WebAuthn.sha256(payload)
 
@@ -87,7 +96,19 @@ object Commands {
         return signers
     }
 
-    fun requiredSigners(trust: Trust, type: String): Int = if (type in TWO_SIG_TYPES && trust.guardians.size >= 2) 2 else 1
+    /** Quantos administradores precisam assinar. */
+    fun requiredSigners(trust: Trust, type: String): Int = if (type in TWO_SIG_TYPES && trust.admins().size >= 2) 2 else 1
+
+    /** O autor pode mandar este comando? Guardião de domínios: só domínios e passkey nova para si mesmo. */
+    fun authorize(trust: Trust, cmd: Command, signers: Set<String>) {
+        val author = trust.guardians[cmd.guardian] ?: throw CommandException("autor desconhecido")
+        if (cmd.type in DOMAIN_TYPES) return
+        if (author.role != ROLE_ADMIN) {
+            if (cmd.type == T_ADD_CREDENTIAL && cmd.args["id"] == cmd.guardian) return
+            throw CommandException("o guardião de domínios não pode mandar este comando")
+        }
+        if ((signers intersect trust.admins()).size < requiredSigners(trust, cmd.type)) throw CommandException("faltam assinaturas de outro administrador")
+    }
 
     /** Criptografia e quórum. Contador e destino são conferidos pelo [Consumer]. */
     fun verifyEnvelope(trust: Trust, env: Map<String, Any?>): Verified {
@@ -99,7 +120,7 @@ object Commands {
         val cmd = parsePayload(payload)
         val signers = verifySigs(trust, payload, env["sigs"])
         if (cmd.guardian !in signers) throw CommandException("o autor do comando não assinou")
-        if (signers.size < requiredSigners(trust, cmd.type)) throw CommandException("faltam assinaturas de outro guardião")
+        authorize(trust, cmd, signers)
         return Verified(cmd, payload, signers)
     }
 }
@@ -122,15 +143,16 @@ class Consumer(val dev: String, val trust: Trust, val lastCtr: MutableMap<String
             Commands.T_ADD_GUARDIAN -> {
                 val id = s("id")
                 if (id in trust.guardians) throw CommandException("guardião já existe")
-                trust.guardians[id] = Guardian(s("name").take(64), linkedMapOf(s("cred") to s("spki")))
+                trust.guardians[id] = Guardian(s("name").take(64), linkedMapOf(s("cred") to s("spki")), Commands.role(a["role"]))
             }
             Commands.T_ADD_CREDENTIAL -> {
                 (trust.guardians[s("id")] ?: throw CommandException("guardião inexistente")).creds[s("cred")] = s("spki")
             }
             Commands.T_REMOVE_GUARDIAN -> {
                 val id = s("id")
-                if (trust.guardians.size <= 1) throw CommandException("não remove o último guardião")
-                if (trust.guardians.remove(id) == null) throw CommandException("guardião inexistente")
+                if (id !in trust.guardians) throw CommandException("guardião inexistente")
+                if (trust.admins() == setOf(id)) throw CommandException("não remove o último administrador")
+                trust.guardians.remove(id)
                 lastCtr.remove(id)
             }
             else -> throw CommandException("não é comando de confiança")
