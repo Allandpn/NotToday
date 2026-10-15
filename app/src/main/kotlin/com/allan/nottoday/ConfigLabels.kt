@@ -19,7 +19,7 @@ object ConfigLabels {
         "browsers_need_filter" to ("Apps marcados só com filtro confirmado" to G_FILTER),
         "dns_filter" to ("Filtro ativo" to G_FILTER),
         "canary" to ("Domínio-canário" to G_FILTER),
-        "routed_extra" to ("Apps no filtro (pacotes)" to G_FILTER),
+        "routed_extra" to ("Outros apps no filtro (pacotes)" to G_FILTER),
         "browsers_exempt" to ("Navegadores fora do filtro (pacotes)" to G_FILTER),
         "new_apps_deny" to ("Suspender apps novos até a aprovação" to G_NEW_APPS),
         "dev_windows_per_day" to ("Janelas de desenvolvimento por 24 h" to G_DEV),
@@ -37,6 +37,10 @@ object ConfigLabels {
 
     private val HINTS = mapOf(
         "canary" to "Trocar o canário espera o atraso.",
+        "routed_extra" to "Apps, além dos navegadores, que passam pelo servidor DNS filtrante. O pacote é o nome técnico do app (ex.: com.nvt.cs).",
+        "browsers_exempt" to "Navegadores que NÃO passam pelo filtro. Isentar um navegador espera o atraso.",
+        "protected_pkgs" to "Apps que ninguém desinstala nem para à força sem passar pelo atraso.",
+        "store_extra" to "Outras lojas de apps a suspender, além das que o NotToday já conhece.",
         "browsers_need_filter" to "Sem VPN ou com o canário resolvendo, os apps marcados são suspensos.",
         "new_apps_deny" to "Instalar é livre; o app novo fica suspenso até a aprovação.",
         Gate.KEY_DELAY to "Aumentar vale na hora; diminuir espera o atraso atual.",

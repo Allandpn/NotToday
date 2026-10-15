@@ -51,6 +51,11 @@ object RemoteReport {
             .map { mapOf("pkg" to it, "label" to PackageGuard.label(context, it)) }
             .sortedBy { (it["label"] as String).lowercase() }.take(MAX_APPROVED)
         val described = ConfigLabels.describe(snapshot.keys)
+        // Nomes dos apps citados nas listas de pacotes da configuração (o site mostra "Nome (pacote)").
+        val pkgNames = listOf("routed_extra", "browsers_exempt", "protected_pkgs", "store_extra")
+            .flatMap { k -> (snapshot[k] ?: "").split(',').map { it.trim() }.filter { it.isNotEmpty() } }
+            .distinct().take(60)
+            .associateWith { PackageGuard.label(context, it) }.filter { it.value != it.key }
         return linkedMapOf(
             "kind" to "device",
             "ts" to System.currentTimeMillis() / 1000,
@@ -69,6 +74,7 @@ object RemoteReport {
             "groups" to described["groups"],
             "hints" to described["hints"],
             "approvedApps" to approved,
+            "pkgNames" to pkgNames,
             "trust" to consumer.trust.guardians.mapValues { (_, g) -> g.creds.keys.sorted() },
             "ctrs" to consumer.lastCtr,
             "executed" to executed.takeLast(50),

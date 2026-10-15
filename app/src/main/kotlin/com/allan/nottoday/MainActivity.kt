@@ -47,6 +47,9 @@ class MainActivity : Activity() {
     private var unlocked = false
     private var changingPin = false
     private var pairing = false
+    private val ticker = android.os.Handler(android.os.Looper.getMainLooper())
+    private var countdownView: TextView? = null
+    private var countdownRunner: Runnable? = null
     private var showBlocked = false
     private var showAds = false
     private var showManual = false
@@ -124,6 +127,7 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         super.onStop()
+        stopCountdown()
         unlocked = false
         showBlocked = false
         page = null
@@ -133,6 +137,7 @@ class MainActivity : Activity() {
 
     /** Nunca deixa uma falha de tela impedir o PIN: se algo quebrar, mostra o erro e volta ao bloqueio. */
     private fun render() {
+        stopCountdown()
         content.removeAllViews()
         (content.parent as? ScrollView)?.scrollTo(0, 0)
         syncBack()
@@ -525,6 +530,40 @@ class MainActivity : Activity() {
         renderRequestToGuardian()
     }
 
+    /** Contagem regressiva da janela de desenvolvimento: atualiza a cada 250 ms e volta ao formulário quando acaba. */
+    private fun startCountdown() {
+        val tv = TextView(this).apply {
+            tag = SettingsPage.ROW
+            textSize = 20f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(getColor(R.color.nt_text))
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+        }
+        content.addView(tv)
+        countdownView = tv
+        val runner = object : Runnable {
+            override fun run() {
+                if (countdownView !== tv) return
+                val left = devWindow.remainingMs()
+                if (left > 0) {
+                    tv.text = "ADB aberto: ${left / 1000 + 1} s restantes"
+                    ticker.postDelayed(this, 250)
+                } else {
+                    countdownView = null
+                    render()
+                }
+            }
+        }
+        countdownRunner = runner
+        runner.run()
+    }
+
+    private fun stopCountdown() {
+        countdownRunner?.let { ticker.removeCallbacks(it) }
+        countdownRunner = null
+        countdownView = null
+    }
+
     /** Janela de desenvolvimento: com o PIN de desenvolvedor (não é o da pessoa de confiança) abre só o ADB. */
     private fun renderDevWindowLogin() {
         val debugSpec = Catalog.restrictions.first { it.key == UserManager.DISALLOW_DEBUGGING_FEATURES }
@@ -532,8 +571,7 @@ class MainActivity : Activity() {
         section("Janela de desenvolvimento")
         val left = devWindow.remainingMs()
         if (left > 0) {
-            text("ADB aberto por mais ${left / 1000 + 1} s.")
-            button("Atualizar") { render() }
+            startCountdown()
             return
         }
         text(
