@@ -34,6 +34,7 @@ num emulador** (AVD "Google APIs", sem contas, `adb install` do mesmo APK de rel
 | 26 | O guardião-mor perde todas as passkeys (a conta Google/Apple dele também) ou some. | O guardião-mor cadastra 2+ passkeys (o site avisa até haver uma chave de reserva); o PIN local presencial continua valendo; sem ele, reset de fábrica. Guardiões de domínios não administram. |
 | 27 | Gateway comprometido ou indisponível. | Não forja comandos (cada um é assinado por passkey) e o aparelho continua protegido; o que se perde é a capacidade de mudar algo remotamente. O PIN local segue funcionando. Veja `docs/REMOTO.md`. |
 | 28 | Relógio do aparelho fora de ±5 min do gateway: as requisições assinadas são recusadas (401). | A política liga hora automática; o canal volta sozinho quando o relógio se corrige. |
+| 29 | Guardião-mor só vale no trabalho (horário) e o computador do trabalho some ou a pessoa perde o emprego antes de trocar. | Troque a passkey ou crie outro guardião-mor antes de perder o acesso (veja docs/OPERACAO.md no guardian). Sem nenhuma passkey utilizável no horário, só o PIN local presencial e, sem ele, o reset de fábrica. |
 
 ## Ordem recomendada
 
@@ -47,4 +48,3 @@ num emulador** (AVD "Google APIs", sem contas, `adb install` do mesmo APK de rel
 Sem `testOnly`, o ADB **não** consegue remover o Device Owner (`dpm remove-active-admin` é recusado).
 Isso é o objetivo, mas também significa que, durante o desenvolvimento, você só itera no emulador/aparelho
 de teste, nunca no aparelho com restrições reais, a não ser via UI (PIN) ou `adb install -r` para atualizar.
-| 29 | Guardião-mor só vale no trabalho (horário) e o computador do trabalho some ou a pessoa perde o emprego antes de trocar. | Troque a passkey ou crie outro guardião-mor antes de perder o acesso (veja docs/OPERACAO.md no guardian). Sem nenhuma passkey utilizável no horário, só o PIN local presencial e, sem ele, o reset de fábrica. |
