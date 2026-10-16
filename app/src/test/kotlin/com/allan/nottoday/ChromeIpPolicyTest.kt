@@ -23,6 +23,16 @@ class ChromeIpPolicyTest {
     }
 
     @Test
+    fun windowsScriptUsesTheSameFile() {
+        val win = File("../scripts/windows/block-ip.pac").readText()
+        assertEquals(pac.replace("
+", "
+").trim(), win.replace("
+", "
+").trim())
+    }
+
+    @Test
     fun policyKeysAreTheOnesChromeReads() {
         // ProxyMode/ProxyPacUrl são os nomes da política do Chrome; o Chrome do Android lê pela configuração gerenciada.
         assertEquals("block-ip.pac", ChromeIpPolicy.ASSET)
