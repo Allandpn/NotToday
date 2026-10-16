@@ -240,13 +240,13 @@ class RemoteCommandsTest {
     @Test
     fun trustGrowsByAddGuardianAndAddCredential() {
         val cris = FakePasskey(rp, origin)
-        assertTrue(send("add_guardian", mapOf("id" to "g_cris", "name" to "Cris", "cred" to cris.credIdB64, "spki" to cris.spkiB64, "role" to "admin")).ok)
+        assertTrue(send("add_guardian", mapOf("id" to "g_cris", "name" to "Cris", "cred" to cris.credIdB64, "spki" to cris.spkiB64, "role" to "admin", "allow_sync" to true)).ok)
         val cris2 = FakePasskey(rp, origin)
         assertTrue(send("add_credential", mapOf("id" to "g_cris", "cred" to cris2.credIdB64, "spki" to cris2.spkiB64)).ok)
         assertEquals(2, store.consumer()!!.trust.guardians["g_cris"]!!.creds.size)
         // o novo guardião já consegue assinar
         assertTrue(send("approve_app", mapOf("pkg" to "com.x"), by = "g_cris", key = cris2, ctrOverride = 1).ok)
-        assertFalse(send("add_guardian", mapOf("id" to "g_cris", "name" to "outra", "cred" to "c", "spki" to "s", "role" to "admin")).ok) // já existe
+        assertFalse(send("add_guardian", mapOf("id" to "g_cris", "name" to "outra", "cred" to "c", "spki" to "s", "role" to "admin", "allow_sync" to true)).ok) // já existe
     }
 
     @Test
@@ -254,7 +254,7 @@ class RemoteCommandsTest {
         becomeOwner()
         val dora = FakePasskey(rp, origin)
         assertFalse(send("add_guardian", mapOf("id" to "g_dora", "name" to "Dora", "cred" to dora.credIdB64, "spki" to dora.spkiB64)).ok) // sem papel
-        assertTrue(send("add_guardian", mapOf("id" to "g_dora", "name" to "Dora", "cred" to dora.credIdB64, "spki" to dora.spkiB64, "role" to "domains")).ok)
+        assertTrue(send("add_guardian", mapOf("id" to "g_dora", "name" to "Dora", "cred" to dora.credIdB64, "spki" to dora.spkiB64, "role" to "domains", "allow_sync" to true)).ok)
         assertEquals("domains", store.consumer()!!.trust.guardians["g_dora"]!!.role)
         var n = 0L
         for ((t, a) in listOf("approve_app" to mapOf("pkg" to "com.x"), "set_config" to mapOf("patch" to emptyMap<String, Any?>()),
@@ -273,6 +273,22 @@ class RemoteCommandsTest {
         assertTrue(r.msg, r.ok)
         assertFalse("g_dora" in store.consumer()!!.trust.guardians)
         assertNull(PendingStore(ctx).get(Pending.Kind.GUARDIAN))
+    }
+
+    @Test
+    fun removingAPasskeyNeedsBothMorAndKeepsTheLastOne() {
+        val extra = FakePasskey(rp, origin)
+        assertTrue(send("add_credential", mapOf("id" to "g_ana", "cred" to extra.credIdB64, "spki" to extra.spkiB64)).ok)
+        val args = mapOf("id" to "g_ana", "cred" to ana.credIdB64)
+        val one = send("remove_credential", args)
+        assertFalse(one.ok)
+        assertTrue(one.msg, one.msg.contains("faltam assinaturas"))
+        val both = send("remove_credential", args, extra = listOf("g_bia" to bia))
+        assertTrue(both.msg, both.ok)
+        assertEquals(setOf(extra.credIdB64), store.consumer()!!.trust.guardians["g_ana"]!!.creds.keys)
+        // a passkey removida não assina mais, e a última não sai
+        assertFalse(send("approve_app", mapOf("pkg" to "com.x")).ok)
+        assertFalse(send("remove_credential", mapOf("id" to "g_ana", "cred" to extra.credIdB64), by = "g_ana", key = extra, extra = listOf("g_bia" to bia)).ok)
     }
 
     @Test

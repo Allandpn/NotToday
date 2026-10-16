@@ -3,15 +3,56 @@ package com.allan.nottoday.remote
 /** Comandos assinados pelos guardiões e o estado de confiança do aparelho. Espelha src/guardian/protocol/commands.py. */
 class CommandException(message: String) : Exception(message)
 
-/** `role`: "admin" ou "domains" (veja docs/PAPEIS.md no guardian). Pareamentos antigos, sem papel, são de guardiões-mor. */
-class Guardian(val name: String, val creds: MutableMap<String, String> = LinkedHashMap(), val role: String = Commands.ROLE_ADMIN)
+/**
+ * Horário em que os comandos de um guardião valem: dias (segunda = 0), minutos do dia [from, to) e o deslocamento fixo do fuso.
+ * Quem consome o comando confere com o PRÓPRIO relógio (não o do navegador). Espelha `check_window`/`in_window` do Python.
+ */
+class Window(val days: List<Int>, val from: Int, val to: Int, val utcOffsetMin: Int) {
+    fun contains(nowMs: Long): Boolean {
+        val t = java.time.Instant.ofEpochMilli(nowMs).plusSeconds(utcOffsetMin * 60L).atZone(java.time.ZoneOffset.UTC)
+        val min = t.hour * 60 + t.minute
+        return (t.dayOfWeek.value - 1) in days && min >= from && min < to
+    }
+
+    fun toJson(): Map<String, Any?> = linkedMapOf("days" to days, "from" to from, "to" to to, "utc_offset_min" to utcOffsetMin)
+
+    companion object {
+        fun parse(v: Any?): Window? {
+            if (v == null) return null
+            val m = v as? Map<*, *> ?: throw CommandException("janela de horário inválida")
+            val days = (m["days"] as? List<*>)?.map { (it as? Long)?.toInt() ?: throw CommandException("janela de horário inválida") }
+            val from = (m["from"] as? Long)?.toInt()
+            val to = (m["to"] as? Long)?.toInt()
+            val off = (m["utc_offset_min"] as? Long)?.toInt()
+            if (days.isNullOrEmpty() || days.any { it !in 0..6 } || from == null || to == null || off == null ||
+                from < 0 || from >= to || to > 1440 || off < -840 || off > 840
+            ) throw CommandException("janela de horário inválida")
+            return Window(days.distinct().sorted(), from, to, off)
+        }
+    }
+}
+
+/**
+ * `role`: "admin" ou "domains" (veja docs/PAPEIS.md no guardian). Pareamentos antigos, sem papel, são de guardiões-mor.
+ * `allowSync` false: só vale passkey presa ao aparelho (flag BE ausente). `window`: horário de validade. Os dois são definidos
+ * quando o guardião é criado e não mudam.
+ */
+class Guardian(
+    val name: String,
+    val creds: MutableMap<String, String> = LinkedHashMap(),
+    val role: String = Commands.ROLE_ADMIN,
+    val allowSync: Boolean = true,
+    val window: Window? = null,
+)
 
 class Trust(val rpId: String, val origin: String, val guardians: MutableMap<String, Guardian> = LinkedHashMap()) {
     fun admins(): Set<String> = guardians.filterValues { it.role == Commands.ROLE_ADMIN }.keys
 
     fun toJson(): Map<String, Any?> = linkedMapOf(
         "rp_id" to rpId, "origin" to origin,
-        "guardians" to guardians.mapValues { (_, g) -> linkedMapOf("name" to g.name, "creds" to g.creds, "role" to g.role) },
+        "guardians" to guardians.mapValues { (_, g) ->
+            linkedMapOf("name" to g.name, "creds" to g.creds, "role" to g.role, "allow_sync" to g.allowSync, "window" to g.window?.toJson())
+        },
     )
 
     companion object {
@@ -22,7 +63,10 @@ class Trust(val rpId: String, val origin: String, val guardians: MutableMap<Stri
                 val m = v as? Map<String, Any?> ?: throw CommandException("guardião inválido")
                 val creds = LinkedHashMap<String, String>()
                 for ((c, s) in (m["creds"] as? Map<String, Any?> ?: emptyMap())) creds[c] = s as? String ?: throw CommandException("credencial inválida")
-                gs[id] = Guardian(m["name"] as? String ?: "", creds, Commands.role(m["role"] ?: Commands.ROLE_ADMIN))
+                gs[id] = Guardian(
+                    m["name"] as? String ?: "", creds, Commands.role(m["role"] ?: Commands.ROLE_ADMIN),
+                    Commands.bool(m["allow_sync"] ?: true), Window.parse(m["window"]),
+                )
             }
             return Trust(
                 d["rp_id"] as? String ?: throw CommandException("rp_id ausente"),
@@ -42,12 +86,16 @@ object Commands {
     const val T_ADD_GUARDIAN = "add_guardian"
     const val T_ADD_CREDENTIAL = "add_credential"
     const val T_REMOVE_GUARDIAN = "remove_guardian"
-    val TRUST_TYPES = setOf(T_ADD_GUARDIAN, T_ADD_CREDENTIAL, T_REMOVE_GUARDIAN)
-    val TWO_SIG_TYPES = setOf(T_REMOVE_GUARDIAN)
+    const val T_REMOVE_CREDENTIAL = "remove_credential"
+    const val FLAG_BE = 0x08 // backup eligible: a passkey pode ser copiada para a nuvem
+    val TRUST_TYPES = setOf(T_ADD_GUARDIAN, T_ADD_CREDENTIAL, T_REMOVE_GUARDIAN, T_REMOVE_CREDENTIAL)
+    val TWO_SIG_TYPES = setOf(T_REMOVE_GUARDIAN, T_REMOVE_CREDENTIAL)
     const val ROLE_ADMIN = "admin"
     const val ROLE_DOMAINS = "domains"
     val ROLES = setOf(ROLE_ADMIN, ROLE_DOMAINS)
     val DOMAIN_TYPES = setOf("pihole_allow", "pihole_deny", "pihole_remove", "pihole_batch")
+
+    fun bool(b: Any?): Boolean = b as? Boolean ?: throw CommandException("valor lógico inválido")
 
     fun role(r: Any?): String = (r as? String)?.takeIf { it in ROLES } ?: throw CommandException("papel inválido")
 
@@ -80,10 +128,13 @@ object Commands {
                 val gid = m["guardian"] as String
                 val g = trust.guardians[gid] ?: throw CommandException("guardião desconhecido")
                 val spki = B64.dec(g.creds[m["cred"] as String] ?: throw CommandException("credencial desconhecida"))
+                val authData = B64.dec(m["authenticatorData"] as String)
                 WebAuthn.verifyAssertion(
-                    spki, B64.dec(m["authenticatorData"] as String), B64.dec(m["clientDataJSON"] as String),
+                    spki, authData, B64.dec(m["clientDataJSON"] as String),
                     B64.dec(m["signature"] as String), challenge, trust.rpId, trust.origin,
                 )
+                // A flag BE está dentro do que foi assinado: não dá para esconder que a passkey é sincronizável.
+                if (!g.allowSync && (authData[32].toInt() and FLAG_BE) != 0) throw CommandException("passkey sincronizável não vale para este guardião")
                 signers.add(gid)
             } catch (e: CommandException) {
                 throw CommandException("assinatura recusada: ${e.message}")
@@ -99,9 +150,13 @@ object Commands {
     /** Quantos guardiões-mor precisam assinar. */
     fun requiredSigners(trust: Trust, type: String): Int = if (type in TWO_SIG_TYPES && trust.admins().size >= 2) 2 else 1
 
-    /** O autor pode mandar este comando? Guardião: só domínios e passkey nova para si mesmo. */
-    fun authorize(trust: Trust, cmd: Command, signers: Set<String>) {
+    /**
+     * O autor pode mandar este comando? Guardião: só domínios e passkey nova para si mesmo. A janela de horário do autor
+     * vale na hora em que este aparelho recebe o comando, pelo relógio dele.
+     */
+    fun authorize(trust: Trust, cmd: Command, signers: Set<String>, nowMs: Long) {
         val author = trust.guardians[cmd.guardian] ?: throw CommandException("autor desconhecido")
+        if (author.window?.contains(nowMs) == false) throw CommandException("fora da janela de horário deste guardião")
         if (cmd.type in DOMAIN_TYPES) return
         if (author.role != ROLE_ADMIN) {
             if (cmd.type == T_ADD_CREDENTIAL && cmd.args["id"] == cmd.guardian) return
@@ -111,7 +166,7 @@ object Commands {
     }
 
     /** Criptografia e quórum. Contador e destino são conferidos pelo [Consumer]. */
-    fun verifyEnvelope(trust: Trust, env: Map<String, Any?>): Verified {
+    fun verifyEnvelope(trust: Trust, env: Map<String, Any?>, nowMs: Long = System.currentTimeMillis()): Verified {
         val payload = try {
             B64.dec(env["payload"] as String)
         } catch (e: Exception) {
@@ -120,15 +175,15 @@ object Commands {
         val cmd = parsePayload(payload)
         val signers = verifySigs(trust, payload, env["sigs"])
         if (cmd.guardian !in signers) throw CommandException("o autor do comando não assinou")
-        authorize(trust, cmd, signers)
+        authorize(trust, cmd, signers, nowMs)
         return Verified(cmd, payload, signers)
     }
 }
 
 /** Estado de quem recebe comandos: confiança fixada, contador por guardião e o id do próprio aparelho. */
 class Consumer(val dev: String, val trust: Trust, val lastCtr: MutableMap<String, Long> = LinkedHashMap()) {
-    fun accept(env: Map<String, Any?>): Verified {
-        val v = Commands.verifyEnvelope(trust, env)
+    fun accept(env: Map<String, Any?>, nowMs: Long = System.currentTimeMillis()): Verified {
+        val v = Commands.verifyEnvelope(trust, env, nowMs)
         if (v.cmd.dev != dev) throw CommandException("comando de outro destino")
         if (v.cmd.ctr <= (lastCtr[v.cmd.guardian] ?: 0L)) throw CommandException("contador repetido (replay)")
         lastCtr[v.cmd.guardian] = v.cmd.ctr
@@ -143,10 +198,19 @@ class Consumer(val dev: String, val trust: Trust, val lastCtr: MutableMap<String
             Commands.T_ADD_GUARDIAN -> {
                 val id = s("id")
                 if (id in trust.guardians) throw CommandException("guardião já existe")
-                trust.guardians[id] = Guardian(s("name").take(64), linkedMapOf(s("cred") to s("spki")), Commands.role(a["role"]))
+                trust.guardians[id] = Guardian(
+                    s("name").take(64), linkedMapOf(s("cred") to s("spki")), Commands.role(a["role"]),
+                    Commands.bool(a["allow_sync"]), Window.parse(a["window"]),
+                )
             }
             Commands.T_ADD_CREDENTIAL -> {
                 (trust.guardians[s("id")] ?: throw CommandException("guardião inexistente")).creds[s("cred")] = s("spki")
+            }
+            Commands.T_REMOVE_CREDENTIAL -> {
+                val g = trust.guardians[s("id")] ?: throw CommandException("guardião inexistente")
+                if (s("cred") !in g.creds) throw CommandException("passkey inexistente")
+                if (g.creds.size <= 1) throw CommandException("não remove a última passkey: remova o guardião")
+                g.creds.remove(s("cred"))
             }
             Commands.T_REMOVE_GUARDIAN -> {
                 val id = s("id")

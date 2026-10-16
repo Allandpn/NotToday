@@ -15,14 +15,18 @@ import javax.crypto.spec.SecretKeySpec
 fun newEcKey(): KeyPair = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
 
 /** Passkey de mentira (software) para assinar comandos nos testes. */
-class FakePasskey(val rpId: String, val origin: String) {
+/** `backupEligible` true imita uma passkey sincronizada (conta Google/Apple): a flag BE vai dentro do authenticatorData assinado. */
+class FakePasskey(val rpId: String, val origin: String, val backupEligible: Boolean = false) {
     val key = newEcKey()
     val credId = ByteArray(32).also { SecureRandom().nextBytes(it) }
     val credIdB64: String get() = B64.enc(credId)
     val spkiB64: String get() = B64.enc(key.public.encoded)
 
-    fun sign(guardian: String, payload: ByteArray, uv: Boolean = true): Map<String, Any?> {
-        val authData = WebAuthn.sha256(rpId.toByteArray()) + byteArrayOf((0x01 or (if (uv) 0x04 else 0)).toByte()) + ByteArray(4)
+    /** A mesma chave, mas o autenticador diz "posso ser copiado" (BE). */
+    fun signWithBackupFlag(guardian: String, payload: ByteArray): Map<String, Any?> = sign(guardian, payload, true, forceBackup = true)
+
+    fun sign(guardian: String, payload: ByteArray, uv: Boolean = true, forceBackup: Boolean = false): Map<String, Any?> {
+        val authData = WebAuthn.sha256(rpId.toByteArray()) + byteArrayOf((0x01 or (if (uv) 0x04 else 0) or (if (backupEligible || forceBackup) 0x08 else 0)).toByte()) + ByteArray(4)
         val cd = Json.encode(mapOf("type" to "webauthn.get", "challenge" to B64.enc(Commands.challengeOf(payload)), "origin" to origin))
             .toByteArray()
         val sig = Signature.getInstance("SHA256withECDSA").run {

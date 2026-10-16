@@ -107,7 +107,7 @@ class RemoteCommands(
                 store.activated = true
                 "aparelho ativado pelo guardião"
             }
-            Commands.T_ADD_GUARDIAN, Commands.T_ADD_CREDENTIAL -> {
+            Commands.T_ADD_GUARDIAN, Commands.T_ADD_CREDENTIAL, Commands.T_REMOVE_CREDENTIAL -> {
                 consumer.applyTrust(cmd)
                 store.saveConsumer(consumer)
                 "confiança atualizada (${cmd.type})"

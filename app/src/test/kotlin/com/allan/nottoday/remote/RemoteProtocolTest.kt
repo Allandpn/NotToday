@@ -3,6 +3,7 @@ package com.allan.nottoday.remote
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -111,7 +112,7 @@ class RemoteProtocolTest {
         assertEquals(dev, again.dev)
         // confiança
         val cmd = { type: String, args: Map<String, Any?> -> Command(dev, "g_ana", 9, type, args) }
-        again.applyTrust(cmd("add_guardian", mapOf("id" to "g_cris", "name" to "Cris", "cred" to "c1", "spki" to "s1", "role" to "domains")))
+        again.applyTrust(cmd("add_guardian", mapOf("id" to "g_cris", "name" to "Cris", "cred" to "c1", "spki" to "s1", "role" to "domains", "allow_sync" to true)))
         assertTrue("g_cris" in again.trust.guardians)
         assertEquals("domains", Consumer.fromJson(Json.parseObject(Json.encode(again.toJson()))).trust.guardians["g_cris"]!!.role)
         assertThrows(CommandException::class.java) { again.applyTrust(cmd("add_guardian", mapOf("id" to "g_cris", "name" to "x", "cred" to "c", "spki" to "s"))) }
@@ -152,5 +153,67 @@ class JsonTest {
         for (bad in listOf("", "{", "[1,]", "{\"a\":}", "tru", "\"abc", "1 2", "{\"a\" 1}", "\"\\x\"", "[" .repeat(40), "{'a':1}")) {
             assertThrows("'$bad'", Json.JsonException::class.java) { Json.parse(bad) }
         }
+    }
+
+    @Test
+    fun windowAndDeviceOnlyRulesUseTheConsumersClock() {
+        val rp = "gw.example"
+        val origin = "https://gw.example"
+        val mor = FakePasskey(rp, origin)
+        val work = Window(listOf(0, 1, 2, 3, 4), 12 * 60, 17 * 60, -180)
+        val trust = Trust(rp, origin, linkedMapOf("g_mor" to Guardian("Allan", linkedMapOf(mor.credIdB64 to mor.spkiB64), "admin", false, work)))
+        val consumer = Consumer("devdevdevdevdevdevdev", trust)
+        fun env(k: FakePasskey, ctr: Long): Map<String, Any?> {
+            val p = payloadOf("devdevdevdevdevdevdev", "g_mor", ctr, "approve_app", mapOf("pkg" to "com.x"))
+            return envelopeOf(p, k.sign("g_mor", p))
+        }
+        fun ms(day: Int, h: Int, m: Int = 0) = java.time.ZonedDateTime.of(2026, 10, day, h, m, 0, 0, java.time.ZoneOffset.ofHours(-3)).toInstant().toEpochMilli()
+        consumer.accept(env(mor, 1), ms(14, 14)) // quarta, 14h: vale
+        for ((day, h) in listOf(14 to 22, 14 to 11, 17 to 14, 18 to 14)) { // à noite, antes, sábado, domingo
+            val e = assertThrows(CommandException::class.java) { consumer.accept(env(mor, 2), ms(day, h)) }
+            assertTrue(e.message, "janela" in e.message!!)
+        }
+        assertEquals(1L, consumer.lastCtr["g_mor"]) // recusado não gasta o contador
+        // a mesma assinatura, mas com a flag "sincronizável": recusada
+        val e = assertThrows(CommandException::class.java) {
+            val p = payloadOf("devdevdevdevdevdevdev", "g_mor", 3, "approve_app", mapOf("pkg" to "com.x"))
+            // a chave certa do guardião, mas com a flag BE ligada
+            consumer.accept(envelopeOf(p, mor.signWithBackupFlag("g_mor", p)), ms(14, 14))
+        }
+        assertTrue(e.message, "sincroniz" in e.message!!)
+        // quem permite sincronizar aceita
+        val open = Trust(rp, origin, linkedMapOf("g_mor" to Guardian("Allan", linkedMapOf(mor.credIdB64 to mor.spkiB64))))
+        val p = payloadOf("devdevdevdevdevdevdev", "g_mor", 1, "approve_app", mapOf("pkg" to "com.x"))
+        Consumer("devdevdevdevdevdevdev", open).accept(envelopeOf(p, mor.signWithBackupFlag("g_mor", p)), ms(14, 22))
+        // a regra sobrevive à serialização, e pareamento antigo (sem as chaves) vale sempre e aceita sincronizada
+        val again = Consumer.fromJson(Json.parseObject(Json.encode(consumer.toJson()))).trust.guardians["g_mor"]!!
+        assertEquals(false, again.allowSync)
+        assertEquals(work.days, again.window!!.days)
+        val old = Trust.fromJson(Json.parseObject("""{"rp_id":"x","origin":"https://x","guardians":{"g":{"name":"A","creds":{"c":"s"},"role":"admin"}}}""")).guardians["g"]!!
+        assertEquals(true, old.allowSync)
+        assertNull(old.window)
+    }
+
+    @Test
+    fun windowValidationAndTrustPolicyAreFixedAtCreation() {
+        for (bad in listOf("""{"days":[],"from":0,"to":10,"utc_offset_min":0}""", """{"days":[7],"from":0,"to":10,"utc_offset_min":0}""",
+            """{"days":[1],"from":600,"to":600,"utc_offset_min":0}""", """{"days":[1],"from":0,"to":1441,"utc_offset_min":0}""",
+            """{"days":[1],"from":0,"to":10,"utc_offset_min":9999}""", "\"x\"")) {
+            assertThrows(CommandException::class.java) { Window.parse(Json.parse(bad)) }
+        }
+        val trust = Trust("gw", "https://gw", linkedMapOf("g_a" to Guardian("A", linkedMapOf("c" to "s"))))
+        val c = Consumer("d", trust)
+        val args = mapOf("id" to "g_n", "name" to "N", "cred" to "c2", "spki" to "s2", "role" to "domains", "allow_sync" to false,
+            "window" to mapOf("days" to listOf(0L, 1L), "from" to 60L, "to" to 120L, "utc_offset_min" to -180L))
+        c.applyTrust(Command("d", "g_a", 9, "add_guardian", args))
+        assertEquals(false, trust.guardians["g_n"]!!.allowSync)
+        assertEquals(60, trust.guardians["g_n"]!!.window!!.from)
+        assertThrows(CommandException::class.java) { c.applyTrust(Command("d", "g_a", 10, "add_guardian", args - "allow_sync" + ("id" to "g_m"))) }
+        assertThrows(CommandException::class.java) { c.applyTrust(Command("d", "g_a", 11, "add_guardian", args + ("allow_sync" to true))) } // já existe: a regra não muda
+        // remover passkey: a última fica
+        c.applyTrust(Command("d", "g_a", 12, "add_credential", mapOf("id" to "g_a", "cred" to "c3", "spki" to "s3")))
+        c.applyTrust(Command("d", "g_a", 13, "remove_credential", mapOf("id" to "g_a", "cred" to "c")))
+        assertEquals(setOf("c3"), trust.guardians["g_a"]!!.creds.keys)
+        assertThrows(CommandException::class.java) { c.applyTrust(Command("d", "g_a", 14, "remove_credential", mapOf("id" to "g_a", "cred" to "c3"))) }
     }
 }
