@@ -251,7 +251,7 @@ class PolicyManager(private val context: Context) {
 
     /**
      * Política gerenciada do Chrome (melhor esforço, sem garantia por versão). Cada item é uma opção da tela:
-     * DoH desligado (só com o filtro ativo), SafeSearch, YouTube restrito (1 moderado, 2 estrito) e sem anônima.
+     * DoH desligado (só com o filtro ativo), SafeSearch, YouTube restrito (1 moderado, 2 estrito), sem anônima e sem acesso por IP.
      */
     private fun applyChromePolicy() {
         val b = Bundle()
@@ -259,6 +259,10 @@ class PolicyManager(private val context: Context) {
         if (config.chromeSafeSearch) b.putBoolean("ForceGoogleSafeSearch", true)
         if (config.chromeYoutube > 0) b.putInt("ForceYouTubeRestrict", config.chromeYoutube)
         if (config.chromeIncognitoBlock) b.putInt("IncognitoModeAvailability", 1)
+        if (config.chromeBlockIp) {
+            b.putString("ProxyMode", "pac_script")
+            b.putString("ProxyPacUrl", ChromeIpPolicy.url(ChromeIpPolicy.pac(context)))
+        }
         dpm.setApplicationRestrictions(admin, CHROME, b)
     }
 

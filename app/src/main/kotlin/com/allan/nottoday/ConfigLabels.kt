@@ -30,6 +30,7 @@ object ConfigLabels {
         "chrome_safesearch" to ("Chrome: SafeSearch" to G_CHROME),
         "chrome_youtube" to ("Chrome: YouTube restrito (0 desligado, 1 moderado, 2 estrito)" to G_CHROME),
         "chrome_incognito_block" to ("Chrome: bloquear modo anônimo" to G_CHROME),
+        "chrome_block_ip" to ("Chrome: bloquear acesso por endereço IP" to G_CHROME),
         "protected_pkgs" to ("Apps protegidos (pacotes)" to G_STORES),
         "postpone_updates" to ("Adiar atualizações do Android (até 30 dias)" to G_SYSTEM),
         Gate.KEY_DELAY to ("Atraso de desbloqueio (minutos)" to G_SECURITY),
@@ -45,6 +46,7 @@ object ConfigLabels {
         "new_apps_deny" to "Instalar é livre; o app novo fica suspenso até a aprovação.",
         Gate.KEY_DELAY to "Aumentar vale na hora; diminuir espera o atraso atual.",
         "chrome_doh_off" to "Com DoH o Chrome ignora o servidor DNS filtrante.",
+        "chrome_block_ip" to "Site digitado como número (IP) não passa pelo filtro de DNS. Só vale no Chrome; apps seguem livres.",
     )
 
     private fun restriction(key: String) = Catalog.restrictions.firstOrNull { "r_${it.key}" == key }

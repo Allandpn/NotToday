@@ -186,6 +186,11 @@ class Config(context: Context) {
         get() = prefs.getString("chrome_youtube", null)?.toIntOrNull()?.coerceIn(0, 2) ?: 1
         set(v) = prefs.edit().putString("chrome_youtube", v.coerceIn(0, 2).toString()).apply()
 
+    /** Recusa endereços IP no Chrome (sites sem nome escapariam do filtro de DNS). Apps seguem livres. */
+    var chromeBlockIp: Boolean
+        get() = prefs.getBoolean("chrome_block_ip", true)
+        set(v) = prefs.edit().putBoolean("chrome_block_ip", v).apply()
+
     /** Desativa o modo anônimo do Chrome (só esconde histórico; não escapa do DNS filtrante). */
     var chromeIncognitoBlock: Boolean
         get() = prefs.getBoolean("chrome_incognito_block", false)
@@ -210,6 +215,7 @@ class Config(context: Context) {
         m["chrome_safesearch"] = chromeSafeSearch.toString()
         m["chrome_youtube"] = chromeYoutube.toString()
         m["chrome_incognito_block"] = chromeIncognitoBlock.toString()
+        m["chrome_block_ip"] = chromeBlockIp.toString()
         m[Gate.KEY_DELAY] = unlockDelayMin.toString()
         m["protected_pkgs"] = protectedPackages.joinToString(",")
     }

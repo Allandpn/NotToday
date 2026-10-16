@@ -685,7 +685,7 @@ class MainActivity : Activity() {
             "apps" -> "Suspender até aprovar: ${yesNo("new_apps_deny")} · ${PackageGuard.pending(this).size} aguardando"
             "dev" -> "${d["dev_windows_per_day"]} janela(s) por dia de ${d["dev_window_seconds"]} s" +
                 if (devPins.isSet) "" else " · PIN não definido"
-            "chrome" -> "DoH desligado: ${if (on("chrome_doh_off")) "sim" else "não"} · SafeSearch: ${if (on("chrome_safesearch")) "sim" else "não"}"
+            "chrome" -> "DoH desligado: ${if (on("chrome_doh_off")) "sim" else "não"} · SafeSearch: ${if (on("chrome_safesearch")) "sim" else "não"} · IP bloqueado: ${if (on("chrome_block_ip")) "sim" else "não"}"
             "sistema" -> "Adiar atualizações: ${yesNo("postpone_updates")}"
             "seguranca" -> "Atraso para afrouxar: ${(d[Gate.KEY_DELAY]?.toLongOrNull() ?: 0) / 60} h"
             "guardian" -> if (remote.isPaired) "Pareado" + if (remote.activated) " e ativado" else ", aguardando ativação" else "Não pareado"
@@ -813,6 +813,10 @@ class MainActivity : Activity() {
                     "Recomendado: com DoH o Chrome ignora o servidor DNS filtrante. Só vale com o filtro ativo.",
                 )
                 bindSwitch("chrome_safesearch", "Forçar SafeSearch do Google")
+                bindSwitch(
+                    "chrome_block_ip", "Bloquear acesso por endereço IP",
+                    "Recomendado: um site aberto pelo número (IP) escapa do filtro de DNS. Redes locais e a Tailscale continuam abrindo. Só vale no Chrome; apps seguem livres.",
+                )
                 bindSwitch("chrome_incognito_block", "Bloquear modo anônimo", "Opcional: o anônimo não escapa do DNS filtrante, só esconde o histórico.")
                 section("YouTube restrito no Chrome")
                 content.addView(Spinner(this).apply {

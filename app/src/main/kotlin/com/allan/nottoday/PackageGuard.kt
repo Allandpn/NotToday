@@ -67,7 +67,7 @@ object PackageGuard {
         KNOWN_RISK[pkg]?.let { out += it }
         val name = (label(context, pkg) + " " + pkg).lowercase()
         if (KEYWORDS.any { it in name }) out += "nome sugere VPN/torrent/anônimo"
-        if (pkg in Browsers.installed(context)) out += "navegador"
+        if (pkg in Browsers.installed(context)) out += if (pkg == "com.android.chrome") "navegador" else "navegador sem bloqueio de acesso por IP"
         try {
             val info = context.packageManager.getPackageInfo(
                 pkg, PackageManager.PackageInfoFlags.of(PackageManager.GET_SERVICES.toLong()),

@@ -107,7 +107,7 @@ class ConfigLabelsTest {
     private val keys = Catalog.restrictions.map { "r_${it.key}" } + listOf(
         "suspend_blocked", "browsers_need_filter", "dns_filter", "canary", "routed_extra", "browsers_exempt", "new_apps_deny",
         "dev_windows_per_day", "dev_window_seconds", "dev_reboot", "postpone_updates", "store_extra", "chrome_doh_off",
-        "chrome_safesearch", "chrome_youtube", "chrome_incognito_block", "protected_pkgs", Gate.KEY_DELAY,
+        "chrome_safesearch", "chrome_youtube", "chrome_incognito_block", "chrome_block_ip", "protected_pkgs", Gate.KEY_DELAY,
     )
 
     @Test
