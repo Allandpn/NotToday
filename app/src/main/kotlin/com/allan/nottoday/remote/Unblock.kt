@@ -9,6 +9,7 @@ import android.content.Context
 data class BlockedItem(val domain: String, val own: Boolean, val list: String, val cname: Boolean, val count: Long, val last: Long)
 data class RequestItem(val domain: String, val state: String, val ttlS: Long?)
 data class UnblockRequest(val id: Long, val status: String, val items: List<RequestItem>)
+data class AppAsk(val pkg: String, val label: String)
 
 /** Pedidos de liberação ao guardião: o que o Pi-hole bloqueou, o pedido e a resposta. Nada de texto livre. */
 class UnblockApi(private val api: GatewayApi, private val dev: String) {
@@ -43,6 +44,15 @@ class UnblockApi(private val api: GatewayApi, private val dev: String) {
                 RequestItem(y["domain"] as? String ?: return@mapNotNull null, y["state"] as? String ?: "open", y["ttl_s"] as? Long)
             },
         )
+    }
+
+    /** Pacotes suspensos que o guardião recusou (para a pessoa saber e poder pedir de novo). */
+    fun refusedApps(): Set<String> =
+        (api.call("GET", "/v1/devices/$dev/apps/refused")["refused"] as? List<*>).orEmpty().mapNotNull { it as? String }.toSet()
+
+    /** Pede a liberação de apps suspensos; um app recusado por engano volta às solicitações do guardião. */
+    fun askApps(apps: Collection<AppAsk>) {
+        api.call("POST", "/v1/devices/$dev/apps/request", mapOf("apps" to apps.map { mapOf("pkg" to it.pkg, "label" to it.label) }))
     }
 
     fun cancel(id: Long) {
