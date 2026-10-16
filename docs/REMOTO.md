@@ -75,3 +75,9 @@ O relatório enviado ao gateway inclui `labels`, `groups` e `hints` (nomes amig�
 Na tela de bloqueio, **Algo foi bloqueado? Pedir liberação** abre a lista do que o Pi-hole bloqueou para este aparelho nas últimas 24 h (por padrão só as regras próprias; um interruptor mostra também anúncios). A pessoa marca os domínios e toca em **Pedir liberação**, depois em **Enviar link ao guardião** (folha de compartilhar do Android). Não há texto livre: o gateway só aceita domínios que o executor viu bloqueados. O pedido manual (app ou outro assunto) fica escondido atrás de um botão.
 
 O canal consulta os pedidos abertos a cada ciclo e mostra uma notificação local quando o guardião responde (liberado, liberado por tempo ou negado). O pedido pode ser cancelado antes da resposta. O app pede a permissão de notificações ao abrir essa tela (Android 13 ou mais).
+
+## Decisões e migração do guardião-mor
+
+As decisões do projeto (papéis, passkey só neste aparelho, horário, fluxo de liberação) e o plano de migração do guardião-mor para o
+computador do trabalho estão no repositório `guardian`: `docs/DECISOES.md` e `docs/MIGRACAO.md`. Neste app, o guardião-mor com horário
+só é conferido depois de atualizar o APK; ligue a restrição "Bloquear mudar data/hora" para o horário não ser burlado mudando o relógio.
