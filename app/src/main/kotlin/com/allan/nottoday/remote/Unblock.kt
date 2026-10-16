@@ -50,6 +50,18 @@ class UnblockApi(private val api: GatewayApi, private val dev: String) {
     }
 }
 
+/** O que a tela mostra depois do "Limpar" local (o log do guardião não é tocado). */
+object Cleared {
+    fun blocked(items: List<BlockedItem>, clearedAt: Long): List<BlockedItem> = items.filter { it.last > clearedAt }
+
+    /** Pedidos abertos sempre aparecem; os respondidos somem até o id que foi limpado. */
+    fun requests(all: List<UnblockRequest>, clearedId: Long): List<UnblockRequest> = all.filter { it.status == "open" || it.id > clearedId }
+
+    fun newestSeen(items: List<BlockedItem>, current: Long): Long = maxOf(current, items.maxOfOrNull { it.last } ?: 0L)
+
+    fun newestAnswered(all: List<UnblockRequest>, current: Long): Long = maxOf(current, all.filter { it.status != "open" }.maxOfOrNull { it.id } ?: 0L)
+}
+
 object UnblockText {
     fun ago(nowS: Long, ts: Long): String {
         val s = (nowS - ts).coerceAtLeast(0)

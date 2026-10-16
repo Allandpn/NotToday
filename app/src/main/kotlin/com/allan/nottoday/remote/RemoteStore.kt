@@ -38,6 +38,16 @@ class RemoteStore(context: Context) {
         get() = (prefs.getString("watched", "") ?: "").split(",").mapNotNull { it.toLongOrNull() }.toSet()
         set(v) = prefs.edit().putString("watched", v.joinToString(",")).apply()
 
+    /** "Limpar" na tela de bloqueados só esconde aqui: o log do guardião não muda. Guarda o `last` mais novo que a pessoa viu. */
+    var blockedClearedAt: Long
+        get() = prefs.getLong("blockedClearedAt", 0L)
+        set(v) = prefs.edit().putLong("blockedClearedAt", v).apply()
+
+    /** Pedidos respondidos com id até este já foram limpos da tela (os ids só crescem). */
+    var requestsClearedId: Long
+        get() = prefs.getLong("requestsClearedId", 0L)
+        set(v) = prefs.edit().putLong("requestsClearedId", v).apply()
+
     val isPaired: Boolean get() = registered && prefs.contains("consumer")
 
     fun consumer(): Consumer? = prefs.getString("consumer", null)?.let {

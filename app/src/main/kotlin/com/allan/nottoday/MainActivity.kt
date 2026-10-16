@@ -19,6 +19,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.allan.nottoday.remote.BlockedItem
 import com.allan.nottoday.remote.CommandException
+import com.allan.nottoday.remote.Cleared
 import com.allan.nottoday.remote.UnblockApi
 import com.allan.nottoday.remote.UnblockRequest
 import com.allan.nottoday.remote.UnblockText
@@ -355,8 +356,10 @@ class MainActivity : Activity() {
         setPadding(dp(14), dp(12), dp(14), dp(12))
     }
 
-    private fun fillBlocked(box: LinearLayout, api: UnblockApi, gateway: String, items: List<BlockedItem>, requests: List<UnblockRequest>, reload: () -> Unit) {
+    private fun fillBlocked(box: LinearLayout, api: UnblockApi, gateway: String, allItems: List<BlockedItem>, allRequests: List<UnblockRequest>, reload: () -> Unit) {
         box.removeAllViews()
+        val items = Cleared.blocked(allItems, remote.blockedClearedAt)
+        val requests = Cleared.requests(allRequests, remote.requestsClearedId)
         val now = System.currentTimeMillis() / 1000
         val open = requests.filter { it.status == "open" }
         val openDomains = open.flatMap { r -> r.items.filter { it.state == "open" }.map { it.domain } }.toSet()
@@ -400,6 +403,21 @@ class MainActivity : Activity() {
                 }
             },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) },
+        )
+        if (fresh.isNotEmpty()) box.addView(
+            Button(this).apply {
+                text = "Limpar a lista"
+                isAllCaps = false
+                setTextColor(getColor(R.color.nt_text))
+                setBackgroundResource(R.drawable.btn_secondary)
+                setOnClickListener {
+                    remote.blockedClearedAt = Cleared.newestSeen(allItems, remote.blockedClearedAt)
+                    picked.clear()
+                    toast("Lista limpa. O guardião continua vendo o registro dele.")
+                    reload()
+                }
+            },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) },
         )
         if (requests.isNotEmpty()) {
             box.addView(TextView(this).apply {
@@ -456,6 +474,19 @@ class MainActivity : Activity() {
                     )
                 }
             }
+            if (requests.any { it.status != "open" }) box.addView(
+                Button(this).apply {
+                    text = "Limpar pedidos respondidos"
+                    isAllCaps = false
+                    setTextColor(getColor(R.color.nt_text))
+                    setBackgroundResource(R.drawable.btn_secondary)
+                    setOnClickListener {
+                        remote.requestsClearedId = Cleared.newestAnswered(allRequests, remote.requestsClearedId)
+                        reload()
+                    }
+                },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) },
+            )
         }
     }
 
