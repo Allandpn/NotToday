@@ -95,6 +95,9 @@ object Commands {
     val ROLES = setOf(ROLE_ADMIN, ROLE_DOMAINS)
     val DOMAIN_TYPES = setOf("pihole_allow", "pihole_deny", "pihole_remove", "pihole_batch")
 
+    /** O que um guardião comum pode mandar: domínios e aprovar app (revogar, regras e PIN são do guardião-mor). */
+    val GUARDIAN_TYPES = DOMAIN_TYPES + "approve_app"
+
     fun bool(b: Any?): Boolean = b as? Boolean ?: throw CommandException("valor lógico inválido")
 
     fun role(r: Any?): String = (r as? String)?.takeIf { it in ROLES } ?: throw CommandException("papel inválido")
@@ -151,13 +154,13 @@ object Commands {
     fun requiredSigners(trust: Trust, type: String): Int = if (type in TWO_SIG_TYPES && trust.admins().size >= 2) 2 else 1
 
     /**
-     * O autor pode mandar este comando? Guardião: só domínios e passkey nova para si mesmo. A janela de horário do autor
+     * O autor pode mandar este comando? Guardião: domínios, aprovar app e passkey nova para si mesmo. A janela de horário do autor
      * vale na hora em que este aparelho recebe o comando, pelo relógio dele.
      */
     fun authorize(trust: Trust, cmd: Command, signers: Set<String>, nowMs: Long) {
         val author = trust.guardians[cmd.guardian] ?: throw CommandException("autor desconhecido")
         if (author.window?.contains(nowMs) == false) throw CommandException("fora da janela de horário deste guardião")
-        if (cmd.type in DOMAIN_TYPES) return
+        if (cmd.type in GUARDIAN_TYPES) return
         if (author.role != ROLE_ADMIN) {
             if (cmd.type == T_ADD_CREDENTIAL && cmd.args["id"] == cmd.guardian) return
             throw CommandException("o guardião não pode mandar este comando")
