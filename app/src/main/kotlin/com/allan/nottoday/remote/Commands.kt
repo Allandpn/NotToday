@@ -95,8 +95,8 @@ object Commands {
     val ROLES = setOf(ROLE_ADMIN, ROLE_DOMAINS)
     val DOMAIN_TYPES = setOf("pihole_allow", "pihole_deny", "pihole_remove", "pihole_batch")
 
-    /** O que um guardião comum pode mandar: domínios e aprovar app (revogar, regras e PIN são do guardião-mor). */
-    val GUARDIAN_TYPES = DOMAIN_TYPES + "approve_app"
+    /** O que um guardião comum pode mandar: domínios e aprovar/revogar app (regras, PIN e pessoas são do guardião-mor). */
+    val GUARDIAN_TYPES = DOMAIN_TYPES + setOf("approve_app", "revoke_app")
 
     fun bool(b: Any?): Boolean = b as? Boolean ?: throw CommandException("valor lógico inválido")
 

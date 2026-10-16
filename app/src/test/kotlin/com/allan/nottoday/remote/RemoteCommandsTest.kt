@@ -258,7 +258,8 @@ class RemoteCommandsTest {
         assertEquals("domains", store.consumer()!!.trust.guardians["g_dora"]!!.role)
         var n = 0L
         assertTrue(send("approve_app", mapOf("pkg" to "com.x"), by = "g_dora", key = dora, ctrOverride = ++n).ok) // aprovar app: o guardião comum também pode
-        for ((t, a) in listOf("revoke_app" to mapOf("pkg" to "com.x"), "set_config" to mapOf("patch" to emptyMap<String, Any?>()),
+        assertTrue(send("revoke_app", mapOf("pkg" to "com.x"), by = "g_dora", key = dora, ctrOverride = ++n).ok) // e revogar também
+        for ((t, a) in listOf("set_pin" to emptyMap<String, Any?>(), "set_config" to mapOf("patch" to emptyMap<String, Any?>()),
             "activate" to emptyMap(), "cancel" to mapOf("kind" to "SETTINGS"), "remove_guardian" to mapOf("id" to "g_bia"))) {
             val r = send(t, a, by = "g_dora", key = dora, ctrOverride = ++n)
             assertFalse(t, r.ok)
