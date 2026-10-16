@@ -47,3 +47,4 @@ num emulador** (AVD "Google APIs", sem contas, `adb install` do mesmo APK de rel
 Sem `testOnly`, o ADB **não** consegue remover o Device Owner (`dpm remove-active-admin` é recusado).
 Isso é o objetivo, mas também significa que, durante o desenvolvimento, você só itera no emulador/aparelho
 de teste, nunca no aparelho com restrições reais, a não ser via UI (PIN) ou `adb install -r` para atualizar.
+| 29 | Guardião-mor só vale no trabalho (horário) e o computador do trabalho some ou a pessoa perde o emprego antes de trocar. | Troque a passkey ou crie outro guardião-mor antes de perder o acesso (veja docs/OPERACAO.md no guardian). Sem nenhuma passkey utilizável no horário, só o PIN local presencial e, sem ele, o reset de fábrica. |
