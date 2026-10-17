@@ -228,10 +228,10 @@ class JsonTest {
         c.applyTrust(Command(dev, "g_mst", 1, "remove_guardian", mapOf("id" to "g_mor")))
         assertThrows(CommandException::class.java) { c.applyTrust(Command(dev, "g_mst", 2, "remove_guardian", mapOf("id" to "g_mst"))) }
         assertThrows(CommandException::class.java) { c.applyTrust(Command(dev, "g_mst", 3, "set_role", mapOf("id" to "g_mst", "role" to "admin"))) }
-        // sem mestre: dois guardiões-mor promovem um deles; uma assinatura só não basta
+        // sem mestre: um guardião-mor promove um deles com uma assinatura; só a promoção a mestre vale
         val old = Trust(rp, origin, linkedMapOf("g_mor" to g(mor, "admin"), "g_b" to g(mst, "admin")))
         val promo = mapOf("id" to "g_b", "role" to "master")
-        assertThrows(CommandException::class.java) { send(old, "g_mor", mor, "set_role", promo) }
+        send(old, "g_mor", mor, "set_role", promo)
         send(old, "g_mor", mor, "set_role", promo, "g_b" to mst)
         assertThrows(CommandException::class.java) { send(old, "g_mor", mor, "set_role", mapOf("id" to "g_b", "role" to "domains"), "g_b" to mst) }
         val c2 = Consumer(dev, old)

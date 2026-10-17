@@ -94,8 +94,8 @@ object Commands {
     const val FLAG_BE = 0x08 // backup eligible: a passkey pode ser copiada para a nuvem
     val TRUST_TYPES = setOf(T_ADD_GUARDIAN, T_ADD_CREDENTIAL, T_REMOVE_GUARDIAN, T_REMOVE_CREDENTIAL, T_SET_ROLE)
 
-    /** Dois guardiões-mor, enquanto não existe mestre (modo antigo). Com o mestre como autor, basta ele. */
-    val TWO_SIG_TYPES = setOf(T_REMOVE_GUARDIAN, T_REMOVE_CREDENTIAL, T_SET_ROLE)
+    /** Dois guardiões-mor, enquanto não existe mestre (modo antigo). Com o mestre como autor, basta ele. set_role não entra: o primeiro mestre nasce com uma assinatura. */
+    val TWO_SIG_TYPES = setOf(T_REMOVE_GUARDIAN, T_REMOVE_CREDENTIAL)
     const val ROLE_MASTER = "master" // inclui e remove guardiões (inclusive outro mestre), sozinho; tem tudo do guardião-mor
     const val ROLE_ADMIN = "admin"
     const val ROLE_DOMAINS = "domains"
