@@ -53,10 +53,12 @@ class MainActivity : Activity() {
     private var countdownView: TextView? = null
     private var countdownRunner: Runnable? = null
     private var showBlocked = false
-    private var blockedTab = "domains"  // Liberações: "domains" | "apps"
+    private var blockedTab = "domains"  // Liberações: "domains" | "apps" | "requests"
+    private var barMode: String? = null  // barra de pedido: "sites" | "apps" | null
+    private lateinit var requestBarView: LinearLayout
+    private val requestLabel by lazy { TextView(this) }
     private val pickedApps = linkedSetOf<String>()
     private var showAds = false
-    private var showManual = false
     private val picked = linkedSetOf<String>()
     private var page: String? = null                 // subtela das configurações (null = início)
     private var draft: MutableMap<String, String>? = null  // alterações ainda não salvas
@@ -104,10 +106,36 @@ class MainActivity : Activity() {
                 setOnClickListener { saveDraft(policy.isDeviceOwner()) }
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
         }
+        requestBarView = LinearLayout(this).apply {
+            tag = "requestbar"
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setBackgroundColor(getColor(R.color.nt_surface2))
+            setPadding(dp(20), dp(10), dp(12), dp(10))
+            visibility = View.GONE
+            addView(requestLabel.apply { textSize = 15f; setTextColor(getColor(R.color.nt_text)) },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(Button(this@MainActivity).apply {
+                text = "Limpar"
+                isAllCaps = false
+                setTextColor(getColor(R.color.nt_text))
+                setBackgroundResource(R.drawable.btn_secondary)
+                setOnClickListener { picked.clear(); pickedApps.clear(); render() }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)).apply { marginEnd = dp(8) })
+            addView(Button(this@MainActivity).apply {
+                text = "Pedir liberação"
+                isAllCaps = false
+                setTextColor(getColor(R.color.nt_ink))
+                setBackgroundResource(R.drawable.btn_primary)
+                setPadding(dp(16), 0, dp(16), 0)
+                setOnClickListener { sendPicked() }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
+        }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(getColor(R.color.nt_bg))
             addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(requestBarView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(saveBarView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
         // targetSdk 36 desenha edge-to-edge: afastar o conteúdo das barras do sistema.
@@ -144,6 +172,7 @@ class MainActivity : Activity() {
         stopCountdown()
         content.removeAllViews()
         (content.parent as? ScrollView)?.scrollTo(0, 0)
+        barMode = null
         syncBack()
         try {
             val owner = policy.isDeviceOwner()
@@ -158,6 +187,7 @@ class MainActivity : Activity() {
                 else -> renderSettings(owner)
             }
             refreshSave()
+            refreshBar()
         } catch (e: Exception) {
             content.removeAllViews()
             unlocked = false
@@ -307,303 +337,336 @@ class MainActivity : Activity() {
     private fun renderRequestToGuardian() {
         if (!remote.isPaired) return
         section("Pedir ao guardião")
-        button("Pedir liberação de sites e apps", primary = true) {
-            showBlocked = true
-            render()
-        }
+        button("Pedir liberação de sites e apps", primary = true) { openLiberacoes() }
         text("Mostra o que o filtro bloqueou e os apps suspensos, e manda o pedido ao guardião.")
     }
 
-    /** O que o Pi-hole bloqueou para este aparelho. A pessoa marca e pede; o guardião decide pelo site. */
+    // --- Liberações ------------------------------------------------------------------------------------
+    // Uma tela com três abas: Sites (o que o filtro bloqueou), Apps (suspensos) e Pedidos (o que já foi pedido e as respostas).
+    // Os dados são buscados ao entrar e ao atualizar; trocar de aba só redesenha. Marcar vira uma barra fixa embaixo
+    // ("N selecionados · Limpar · Pedir liberação"), igual à barra de salvar das configurações.
+
+    private class BlockedData(val items: List<BlockedItem>, val requests: List<UnblockRequest>, val refused: Set<String>)
+
+    private var blockedData: BlockedData? = null
+    private var blockedError: String? = null
+    private var blockedLoading = false
+    private var notifAsked = false
+
+    private fun unblockApi(): Pair<UnblockApi, String>? {
+        val c = remote.consumer() ?: return null
+        val gw = remote.gateway ?: return null
+        return Pair(UnblockApi(GatewayApi(gw), c.dev), gw)
+    }
+
+    private fun openLiberacoes(tab: String? = null) {
+        blockedData = null
+        blockedError = null
+        showBlocked = true
+        if (tab != null) blockedTab = tab
+        if (android.os.Build.VERSION.SDK_INT >= 33 && !notifAsked) {
+            notifAsked = true
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
+        render()
+        loadBlocked()
+    }
+
+    /** Só para os testes de captura de tela: mostra a tela de liberações com dados prontos, sem rede. */
+    internal fun debugShowBlocked(items: List<BlockedItem>, requests: List<UnblockRequest>, tab: String, marked: Set<String> = emptySet()) {
+        showBlocked = true
+        blockedTab = tab
+        blockedData = BlockedData(items, requests, emptySet())
+        blockedError = null
+        picked.clear()
+        picked.addAll(marked)
+        render()
+    }
+
+    private fun loadBlocked() {
+        val api = unblockApi()?.first ?: return
+        if (blockedLoading) return
+        blockedLoading = true
+        val onlyOwn = !showAds
+        runAsync(onDone = { blockedLoading = false }) {
+            var data: BlockedData? = null
+            var err: String? = null
+            try {
+                val items = api.blocked(onlyOwn)
+                val reqs = api.requests()
+                val refused = try { api.refusedApps() } catch (_: Exception) { emptySet() }
+                data = BlockedData(items, reqs, refused)
+            } catch (e: Exception) {
+                err = e.message ?: e.javaClass.simpleName
+            }
+            runOnUiThread {
+                if (!showBlocked || isFinishing) return@runOnUiThread
+                if (data != null) blockedData = data
+                blockedError = err
+                render()
+            }
+        }
+    }
+
     private fun renderBlocked() {
-        title("Liberações")
-        val tabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        for ((label, key) in listOf("Domínios" to "domains", "Apps" to "apps")) {
+        subTitle("Liberações") { blockedData = null; blockedError = null; render(); loadBlocked() }
+        val api = unblockApi()
+        val d = blockedData
+        val open = d?.requests?.count { it.status == "open" } ?: 0
+        val tabs = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundResource(R.drawable.group_bg)
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        for ((key, label) in listOf("domains" to "Sites", "apps" to "Apps", "requests" to if (open > 0) "Pedidos · $open" else "Pedidos")) {
+            val on = blockedTab == key
             tabs.addView(
-                Button(this).apply {
+                TextView(this).apply {
                     text = label
-                    isAllCaps = false
-                    setTextColor(getColor(if (blockedTab == key) R.color.nt_ink else R.color.nt_text))
-                    setBackgroundResource(if (blockedTab == key) R.drawable.btn_primary else R.drawable.btn_secondary)
-                    minHeight = dp(48)
-                    minimumHeight = dp(48)
+                    gravity = android.view.Gravity.CENTER
+                    textSize = 15f
+                    setTextColor(getColor(if (on) R.color.nt_ink else R.color.nt_text))
+                    touchable()
+                    if (on) setBackgroundResource(R.drawable.btn_primary) // depois do toque: a aba marcada fica cheia
                     setOnClickListener { blockedTab = key; render() }
                 },
-                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(6) },
+                LinearLayout.LayoutParams(0, dp(44), 1f),
             )
         }
-        content.addView(tabs)
-        if (blockedTab == "apps") return renderSuspendedApps()
-        text("Marque o que você tentou abrir e peça a liberação. O guardião decide pelo site.")
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        content.addView(box)
-        val c = remote.consumer()
-        val gw = remote.gateway
-        if (c == null || gw == null) {
-            cardText("Sem pareamento com o guardião.")
-            button("Voltar") { showBlocked = false; render() }
+        content.addLoose(tabs, matchWrap.apply { topMargin = dp(4) })
+        if (api == null) {
+            section(null)
+            text("Sem pareamento com o guardião.")
             return
         }
-        val api = UnblockApi(GatewayApi(gw), c.dev)
-        if (android.os.Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
-        fun ui(block: () -> Unit) = runOnUiThread { if (showBlocked && !isFinishing) block() }
-        fun reload() {
-            box.removeAllViews()
-            box.addView(TextView(this).apply { text = "Carregando…"; setTextColor(getColor(R.color.nt_muted)) })
-            runAsync {
-                val result = try {
-                    Pair(api.blocked(!showAds), api.requests())
-                } catch (e: Exception) {
-                    ui { box.removeAllViews(); box.addView(cardView("Não foi possível falar com o gateway: ${e.message ?: e.javaClass.simpleName}")) }
-                    return@runAsync
-                }
-                ui { fillBlocked(box, api, gw, result.first, result.second, ::reload) }
-            }
+        blockedError?.let { section(null); cardText("Não foi possível falar com o gateway\n$it") }
+        if (d == null) {
+            section(null)
+            text(if (blockedError == null) "Carregando…" else "Toque em atualizar (canto de cima) para tentar de novo.")
+            return
         }
-        reload()
-        switchRow("Mostrar também anúncios e rastreadores", showAds).apply {
-            setOnCheckedChangeListener { _, on -> showAds = on; render() }
+        when (blockedTab) {
+            "apps" -> drawApps(d)
+            "requests" -> drawRequests(api.first, api.second, d)
+            else -> drawSites(d)
         }
-        button("Atualizar") { reload() }
-        button("Voltar") { showBlocked = false; render() }
-        button(if (showManual) "Esconder pedido manual" else "Pedido manual (app ou outro)") { showManual = !showManual; render() }
-        if (showManual) renderManualRequest()
     }
 
-    /** Apps suspensos até o guardião aprovar. A pessoa pode pedir a liberação, inclusive de um app que o guardião recusou por engano. */
-    private fun renderSuspendedApps() {
-        text("Estes apps estão suspensos até o guardião aprovar. Marque os que você precisa e peça a liberação. Se o guardião recusou por engano, o pedido o faz analisar de novo.")
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        content.addView(box)
-        val c = remote.consumer()
-        val gw = remote.gateway
-        if (c == null || gw == null) {
-            cardText("Sem pareamento com o guardião.")
-            button("Voltar") { showBlocked = false; render() }
-            return
+    /** Uma linha marcável: tocar em qualquer parte alterna; o resumo fica embaixo do título. */
+    private fun pickRow(title: String, summary: String?, checked: Boolean, titleColor: Int = R.color.nt_text, onToggle: (Boolean) -> Unit) {
+        val cb = android.widget.CheckBox(this).apply {
+            isChecked = checked
+            buttonTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.nt_green))
+            isClickable = false
+            isFocusable = false
         }
-        val api = UnblockApi(GatewayApi(gw), c.dev)
-        val pending = PackageGuard.pending(this)
-        pickedApps.retainAll(pending.toSet())
-        fun ui(block: () -> Unit) = runOnUiThread { if (showBlocked && blockedTab == "apps" && !isFinishing) block() }
-        fun reload() {
-            box.removeAllViews()
-            box.addView(TextView(this).apply { text = "Carregando…"; setTextColor(getColor(R.color.nt_muted)) })
-            runAsync {
-                val refused = try { api.refusedApps() } catch (_: Exception) { emptySet() }
-                ui { fillSuspendedApps(box, api, pending, refused, ::reload) }
-            }
-        }
-        reload()
-        button("Atualizar") { reload() }
-        button("Voltar") { showBlocked = false; render() }
-    }
-
-    private fun fillSuspendedApps(box: LinearLayout, api: UnblockApi, pending: List<String>, refused: Set<String>, reload: () -> Unit) {
-        box.removeAllViews()
-        if (pending.isEmpty()) {
-            box.addView(cardView("Nenhum app suspenso."))
-            return
-        }
-        for (pkg in pending) {
-            val state = if (pkg in refused) "Recusado pelo guardião" else "Aguardando o guardião"
-            box.addView(android.widget.CheckBox(this).apply {
-                text = "${PackageGuard.label(this@MainActivity, pkg)}\n$state"
-                setTextColor(getColor(if (pkg in refused) R.color.nt_orange else R.color.nt_text))
-                buttonTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.nt_green))
-                isChecked = pkg in pickedApps
-                setPadding(0, dp(8), 0, dp(8))
-                setOnCheckedChangeListener { _, on -> if (on) pickedApps.add(pkg) else pickedApps.remove(pkg) }
-            })
-        }
-        box.addView(
-            Button(this).apply {
-                text = "Pedir liberação dos apps marcados"
-                isAllCaps = false
-                setTextColor(getColor(R.color.nt_ink))
-                setBackgroundResource(R.drawable.btn_primary)
-                minHeight = dp(52)
-                minimumHeight = dp(52)
-                setOnClickListener {
-                    if (pickedApps.isEmpty()) return@setOnClickListener toast("Marque pelo menos um app")
-                    val chosen = pickedApps.toList().take(20).map { AppAsk(it, PackageGuard.label(this@MainActivity, it)) }
-                    runAsync {
-                        val msg = try {
-                            api.askApps(chosen)
-                            pickedApps.clear()
-                            "Pedido enviado. Avise o guardião."
-                        } catch (e: Exception) {
-                            "Não foi possível pedir: ${e.message ?: e.javaClass.simpleName}"
-                        }
-                        runOnUiThread { toast(msg); reload() }
-                    }
-                }
+        content.addView(
+            LinearLayout(this).apply {
+                tag = SettingsPage.ROW
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                minimumHeight = dp(64)
+                setPadding(dp(16), dp(12), dp(8), dp(12))
+                touchable()
+                setOnClickListener { cb.toggle(); onToggle(cb.isChecked); refreshBar() }
+                addView(twoLine(title, summary, titleColor), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(cb)
             },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) },
         )
     }
 
-    private fun cardView(s: String) = TextView(this).apply {
-        text = s
-        setTextColor(getColor(R.color.nt_text))
-        setBackgroundResource(R.drawable.card_bg)
-        setPadding(dp(14), dp(12), dp(14), dp(12))
-    }
-
-    private fun fillBlocked(box: LinearLayout, api: UnblockApi, gateway: String, allItems: List<BlockedItem>, allRequests: List<UnblockRequest>, reload: () -> Unit) {
-        box.removeAllViews()
-        val items = Cleared.blocked(allItems, remote.blockedClearedAt)
-        val requests = Cleared.requests(allRequests, remote.requestsClearedId)
+    private fun drawSites(d: BlockedData) {
         val now = System.currentTimeMillis() / 1000
-        val open = requests.filter { it.status == "open" }
-        val openDomains = open.flatMap { r -> r.items.filter { it.state == "open" }.map { it.domain } }.toSet()
+        val openDomains = d.requests.filter { it.status == "open" }.flatMap { r -> r.items.filter { it.state == "open" }.map { it.domain } }.toSet()
         // O canário é o teste de saúde do filtro: bloqueado de propósito, nunca é pedido de liberação.
         val canary = config.canary.trim().lowercase().trimEnd('.')
-        val fresh = items.filter { it.domain !in openDomains && it.domain != canary }
+        val fresh = Cleared.blocked(d.items, remote.blockedClearedAt).filter { it.domain !in openDomains && it.domain != canary }
         picked.retainAll(fresh.map { it.domain }.toSet())
-        if (fresh.isEmpty()) box.addView(cardView("Nada bloqueado nas últimas 24 horas."))
-        for (b in fresh.take(60)) {
-            box.addView(android.widget.CheckBox(this).apply {
-                text = "${b.domain}\n${b.count} vez${if (b.count > 1) "es" else ""} · ${UnblockText.ago(now, b.last)} · " +
-                    (if (b.own) "regra própria" else b.list.ifEmpty { "lista" }.substringAfter("://").substringBefore('/'))
-                setTextColor(getColor(R.color.nt_text))
-                buttonTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.nt_green))
-                isChecked = b.domain in picked
-                setPadding(0, dp(8), 0, dp(8))
-                setOnCheckedChangeListener { _, on -> if (on) picked.add(b.domain) else picked.remove(b.domain) }
-            })
+
+        section("O que aparece aqui")
+        text("Marque o que você tentou abrir e peça a liberação. O guardião decide pelo site.")
+        switchRow("Mostrar também anúncios e rastreadores", showAds, "Inclui o que as listas de anúncios bloquearam.").apply {
+            setOnCheckedChangeListener { _, on -> showAds = on; blockedData = null; render(); loadBlocked() }
         }
-        if (fresh.isNotEmpty()) box.addView(
-            Button(this).apply {
-                text = "Pedir liberação"
-                isAllCaps = false
-                setTextColor(getColor(R.color.nt_ink))
-                setBackgroundResource(R.drawable.btn_primary)
-                minHeight = dp(48)
-                minimumHeight = dp(48)
-                setOnClickListener {
-                    if (picked.isEmpty()) return@setOnClickListener toast("Marque pelo menos um")
-                    val chosen = picked.toList().take(20)
-                    runAsync {
-                        val msg = try {
-                            api.request(chosen)
-                            val c = remote.consumer()
-                            if (c != null) remote.watched = remote.watched + api.requests().filter { it.status == "open" }.map { it.id }
-                            picked.clear()
-                            "Pedido enviado. Avise o guardião."
-                        } catch (e: Exception) {
-                            "Não foi possível pedir: ${e.message ?: e.javaClass.simpleName}"
-                        }
-                        runOnUiThread { toast(msg); reload() }
+        if (fresh.isEmpty()) {
+            section("Bloqueado")
+            text("Nada bloqueado nas últimas 24 horas. Tente abrir o site de novo e volte aqui.")
+        } else {
+            fun source(b: BlockedItem) = if (b.own) "regra própria" else b.list.ifEmpty { "lista" }.substringAfter("://").substringBefore('/')
+            fun summary(b: BlockedItem) = "${b.count} vez${if (b.count > 1) "es" else ""} · ${UnblockText.ago(now, b.last)} · ${source(b)}"
+            val recent = fresh.filter { now - it.last <= 900 }
+            val older = fresh.filter { now - it.last > 900 }.take(60)
+            if (recent.isNotEmpty()) {
+                section("Agora · últimos 15 min")
+                recent.take(60).forEach { b -> pickRow(b.domain, summary(b), b.domain in picked) { if (it) picked.add(b.domain) else picked.remove(b.domain) } }
+            }
+            if (older.isNotEmpty()) {
+                section("Antes · últimas 24 h")
+                older.forEach { b -> pickRow(b.domain, summary(b), b.domain in picked) { if (it) picked.add(b.domain) else picked.remove(b.domain) } }
+            }
+            section("Lista")
+            button("Selecionar os mais recentes", summary = "Até $MAX_ASK de uma vez") {
+                picked.clear()
+                picked.addAll(fresh.take(MAX_ASK).map { it.domain })
+                render()
+            }
+            button("Esconder desta lista", summary = "Só tira daqui o que já apareceu. O guardião continua vendo o registro dele.") {
+                remote.blockedClearedAt = Cleared.newestSeen(d.items, remote.blockedClearedAt)
+                picked.clear()
+                toast("Lista limpa")
+                render()
+            }
+        }
+        section("Outro assunto")
+        button("Pedir um app ou outro assunto…", summary = "Texto livre, para o que o filtro não mostra") { manualDialog() }
+        barMode = "sites"
+        refreshBar()
+    }
+
+    private fun drawApps(d: BlockedData) {
+        val pending = PackageGuard.pending(this)
+        pickedApps.retainAll(pending.toSet())
+        section("Apps suspensos")
+        text("Estes apps ficam suspensos até o guardião aprovar. Marque os que você precisa e peça a liberação. Se o guardião recusou por engano, o pedido o faz analisar de novo.")
+        if (pending.isEmpty()) {
+            text("Nenhum app suspenso.")
+        } else {
+            for (pkg in pending) {
+                val refused = pkg in d.refused
+                pickRow(
+                    PackageGuard.label(this, pkg), if (refused) "Recusado pelo guardião" else "Aguardando o guardião",
+                    pkg in pickedApps, if (refused) R.color.nt_orange else R.color.nt_text,
+                ) { if (it) pickedApps.add(pkg) else pickedApps.remove(pkg) }
+            }
+        }
+        barMode = "apps"
+        refreshBar()
+    }
+
+    private fun drawRequests(api: UnblockApi, gateway: String, d: BlockedData) {
+        val requests = Cleared.requests(d.requests, remote.requestsClearedId)
+        val open = requests.filter { it.status == "open" }
+        val answered = requests.filter { it.status != "open" }.take(8)
+        if (requests.isEmpty()) {
+            section(null)
+            text("Nenhum pedido ainda. Marque o que você precisa em Sites ou Apps.")
+            return
+        }
+        for (r in open) {
+            val n = r.items.count { it.state == "open" }
+            section("Aguardando o guardião · $n ${if (n > 1) "itens" else "item"}")
+            r.items.forEach { content.addView(rowOf(it.domain, UnblockText.stateLabel(it))) }
+            button("Enviar link ao guardião", summary = "Ele não é avisado sozinho: mande o link por mensagem") {
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(android.content.Intent.EXTRA_TEXT, "Pedi a liberação de $n ${if (n > 1) "itens" else "item"} no NotToday: $gateway/#/domains/pedidos")
+                }
+                startActivity(android.content.Intent.createChooser(send, "Enviar ao guardião"))
+            }
+            button("Cancelar este pedido") {
+                runAsync {
+                    try {
+                        api.cancel(r.id)
+                    } catch (e: Exception) {
+                        runOnUiThread { toast("Não foi possível cancelar: ${e.message}") }
                     }
-                }
-            },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) },
-        )
-        if (fresh.isNotEmpty()) box.addView(
-            Button(this).apply {
-                text = "Limpar a lista"
-                isAllCaps = false
-                setTextColor(getColor(R.color.nt_text))
-                setBackgroundResource(R.drawable.btn_secondary)
-                setOnClickListener {
-                    remote.blockedClearedAt = Cleared.newestSeen(allItems, remote.blockedClearedAt)
-                    picked.clear()
-                    toast("Lista limpa. O guardião continua vendo o registro dele.")
-                    reload()
-                }
-            },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) },
-        )
-        if (requests.isNotEmpty()) {
-            box.addView(TextView(this).apply {
-                text = "SEUS PEDIDOS"
-                textSize = 12f
-                letterSpacing = 0.08f
-                setTypeface(typeface, Typeface.BOLD)
-                setTextColor(getColor(R.color.nt_muted))
-                setPadding(0, dp(24), 0, dp(6))
-            })
-            for (r in requests.take(8)) {
-                val head = if (r.status == "open") "Aguardando o guardião" else "Respondido"
-                box.addView(
-                    cardView(head + "\n" + r.items.joinToString("\n") { "${it.domain}: ${UnblockText.stateLabel(it)}" })
-                        .apply { if (r.status == "open") setBackgroundResource(R.drawable.card_accent) },
-                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) },
-                )
-                if (r.status == "open") {
-                    box.addView(
-                        Button(this).apply {
-                            text = "Enviar link ao guardião"
-                            isAllCaps = false
-                            setTextColor(getColor(R.color.nt_ink))
-                            setBackgroundResource(R.drawable.btn_primary)
-                            setOnClickListener {
-                                val n = r.items.count { it.state == "open" }
-                                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(android.content.Intent.EXTRA_TEXT, "Pedi a liberação de $n site${if (n > 1) "s" else ""} no NotToday: $gateway/#/domains/pedidos")
-                                }
-                                startActivity(android.content.Intent.createChooser(send, "Enviar ao guardião"))
-                            }
-                        },
-                        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) },
-                    )
-                    box.addView(
-                        Button(this).apply {
-                            text = "Cancelar pedido"
-                            isAllCaps = false
-                            setTextColor(getColor(R.color.nt_text))
-                            setBackgroundResource(R.drawable.btn_secondary)
-                            setOnClickListener {
-                                runAsync {
-                                    try {
-                                        api.cancel(r.id)
-                                    } catch (e: Exception) {
-                                        runOnUiThread { toast("Não foi possível cancelar: ${e.message}") }
-                                    }
-                                    runOnUiThread { reload() }
-                                }
-                            }
-                        },
-                        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) },
-                    )
+                    runOnUiThread { blockedData = null; render(); loadBlocked() }
                 }
             }
-            if (requests.any { it.status != "open" }) box.addView(
-                Button(this).apply {
-                    text = "Limpar pedidos respondidos"
-                    isAllCaps = false
-                    setTextColor(getColor(R.color.nt_text))
-                    setBackgroundResource(R.drawable.btn_secondary)
-                    setOnClickListener {
-                        remote.requestsClearedId = Cleared.newestAnswered(allRequests, remote.requestsClearedId)
-                        reload()
-                    }
-                },
-                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) },
-            )
+        }
+        if (answered.isNotEmpty()) {
+            section("Respondidos")
+            answered.forEach { r ->
+                r.items.forEach { content.addView(rowOf(it.domain, UnblockText.stateLabel(it), if (it.state == "denied") R.color.nt_orange else R.color.nt_text)) }
+            }
+            section("Histórico")
+            button("Limpar os respondidos", summary = "Só some daqui. O guardião continua vendo o registro dele.") {
+                remote.requestsClearedId = Cleared.newestAnswered(d.requests, remote.requestsClearedId)
+                render()
+            }
         }
     }
 
-    /** Escape para o que o DNS não mostra (um app, outro assunto): texto livre, escondido por padrão. */
-    private fun renderManualRequest() {
+    /** Linha só de leitura (título e resumo). */
+    private fun rowOf(title: String, summary: String?, titleColor: Int = R.color.nt_text): View =
+        twoLine(title, summary, titleColor).apply {
+            tag = SettingsPage.ROW
+            minimumHeight = dp(56)
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
+
+    /** Barra fixa de baixo da tela de pedidos: quantos estão marcados, limpar a seleção e pedir. */
+    private fun refreshBar() {
+        val n = when (barMode) {
+            "sites" -> picked.size
+            "apps" -> pickedApps.size
+            else -> 0
+        }
+        requestBarView.visibility = if (showBlocked && n > 0) View.VISIBLE else View.GONE
+        requestLabel.text = "$n marcado${if (n > 1) "s" else ""}" + if (n > MAX_ASK) "\nvão só os $MAX_ASK primeiros" else ""
+    }
+
+    private fun sendPicked() {
+        val api = unblockApi()?.first ?: return
+        val sites = barMode == "sites"
+        val chosen = (if (sites) picked.toList() else pickedApps.toList()).take(MAX_ASK)
+        if (chosen.isEmpty()) return
+        runAsync {
+            val msg = try {
+                if (sites) {
+                    api.request(chosen)
+                } else {
+                    api.askApps(chosen.map { AppAsk(it, PackageGuard.label(this, it)) })
+                }
+                remote.watched = remote.watched + api.requests().filter { it.status == "open" }.map { it.id }
+                picked.clear()
+                pickedApps.clear()
+                "Pedido enviado. Mande o link ao guardião."
+            } catch (e: Exception) {
+                "Não foi possível pedir: ${e.message ?: e.javaClass.simpleName}"
+            }
+            runOnUiThread {
+                toast(msg)
+                if (!msg.startsWith("Não")) blockedTab = "requests"
+                blockedData = null
+                render()
+                loadBlocked()
+            }
+        }
+    }
+
+    /** Escape para o que o DNS não mostra (um app, outro assunto): texto livre, numa janela, fora da lista. */
+    private fun manualDialog() {
+        val kinds = listOf("app" to "App", "other" to "Outro assunto", "domain" to "Site (digitando o endereço)")
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+        }
+        val kind = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, kinds.map { it.second })
+        }
         val what = EditText(this).apply {
             hint = "o que você precisa, e o motivo"
             setTextColor(getColor(R.color.nt_text))
             setHintTextColor(getColor(R.color.nt_muted))
             inputType = InputType.TYPE_CLASS_TEXT
         }
-        content.addView(what)
-        for ((label, kind) in listOf("Pedir app" to "app", "Outro pedido" to "other", "Pedir domínio digitando" to "domain")) {
-            button(label) {
+        box.addView(kind)
+        box.addView(what)
+        AlertDialog.Builder(this)
+            .setTitle("Pedido manual")
+            .setView(box)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Enviar") { _, _ ->
                 val t = what.text.toString().trim()
-                if (t.isEmpty()) return@button toast("Escreva o pedido")
+                if (t.isEmpty()) return@setPositiveButton toast("Escreva o pedido")
+                val k = kinds[kind.selectedItemPosition].first
                 runAsync {
                     val msg = try {
                         val c = remote.consumer() ?: throw CommandException("sem pareamento")
                         GatewayApi(remote.gateway ?: throw CommandException("sem gateway"))
-                            .call("POST", "/v1/devices/${c.dev}/requests", mapOf("kind" to kind, "text" to t.take(500)))
+                            .call("POST", "/v1/devices/${c.dev}/requests", mapOf("kind" to k, "text" to t.take(500)))
                         "Pedido enviado"
                     } catch (e: Exception) {
                         "Não foi possível enviar: ${e.message ?: e.javaClass.simpleName}"
@@ -611,7 +674,7 @@ class MainActivity : Activity() {
                     runOnUiThread { toast(msg) }
                 }
             }
-        }
+            .show()
     }
 
     private fun renderRemoteSettings(owner: Boolean) {
@@ -790,7 +853,7 @@ class MainActivity : Activity() {
     }
 
     /** Título de subtela com a seta de voltar, como nas Configurações. */
-    private fun subTitle(s: String) = content.addLoose(
+    private fun subTitle(s: String, onRefresh: (() -> Unit)? = null) = content.addLoose(
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
@@ -808,7 +871,15 @@ class MainActivity : Activity() {
                 textSize = 28f
                 setTextColor(getColor(R.color.nt_text))
                 setPadding(dp(8), 0, 0, 0)
-            })
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            if (onRefresh != null) addView(android.widget.ImageButton(this@MainActivity).apply {
+                setImageResource(R.drawable.ic_refresh)
+                contentDescription = "Atualizar"
+                val tv = android.util.TypedValue()
+                theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true)
+                setBackgroundResource(tv.resourceId)
+                setOnClickListener { onRefresh() }
+            }, LinearLayout.LayoutParams(dp(48), dp(48)))
         },
         matchWrap,
     )
@@ -1272,6 +1343,8 @@ class MainActivity : Activity() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
+    private companion object { const val MAX_ASK = 20 }
+
     private val matchWrap get() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
 
     /** Fundo com o efeito de toque do sistema (o mesmo das Configurações). */
@@ -1295,7 +1368,7 @@ class MainActivity : Activity() {
     )
 
     /** Nova categoria (nome em destaque e um grupo novo). */
-    private fun section(s: String) = content.startGroup(s)
+    private fun section(s: String?) = content.startGroup(s)
 
     /** Texto explicativo dentro do grupo, no tom secundário. */
     private fun text(s: String) = content.addView(TextView(this).apply {

@@ -7,7 +7,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.ScrollView
+import com.allan.nottoday.remote.BlockedItem
 import com.allan.nottoday.remote.Consumer
+import com.allan.nottoday.remote.RequestItem
+import com.allan.nottoday.remote.UnblockRequest
 import com.allan.nottoday.remote.Guardian
 import com.allan.nottoday.remote.RemoteStore
 import com.allan.nottoday.remote.Trust
@@ -53,7 +56,7 @@ class ScreenshotTest {
         val w = scroll.width.coerceAtLeast(1)
         child.measure(View.MeasureSpec.makeMeasureSpec(w - scroll.paddingLeft - scroll.paddingRight, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
-        val bar = views(a.window.decorView).firstOrNull { it.tag == "savebar" && it.visibility == View.VISIBLE }
+        val bar = views(a.window.decorView).firstOrNull { (it.tag == "savebar" || it.tag == "requestbar") && it.visibility == View.VISIBLE }
         bar?.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
         val barH = bar?.measuredHeight ?: 0
         val h = (child.measuredHeight + scroll.paddingTop + scroll.paddingBottom).coerceAtLeast(scroll.height) + barH
@@ -113,5 +116,26 @@ class ScreenshotTest {
         button(a, "Filtro DNS").performClick()
         views(a.window.decorView).filterIsInstance<android.widget.Switch>().first().performClick() // muda o rascunho
         shot(a, "07-filtro-com-alteracao")
+        a.finish()
+
+        // 4) liberações: sites, pedidos e apps (dados prontos, sem rede)
+        val now = System.currentTimeMillis() / 1000
+        val items = listOf(
+            BlockedItem("cdn.video.exemplo.com", true, "", false, 3, now - 120), BlockedItem("api.video.exemplo.com", true, "", false, 1, now - 130),
+            BlockedItem("img.rastreador.net", false, "https://listas.exemplo/ads.txt", false, 9, now - 600),
+            BlockedItem("jogos.exemplo.net", true, "", false, 5, now - 3 * 3600), BlockedItem("loja.exemplo.org", true, "", false, 2, now - 9 * 3600),
+        )
+        val reqs = listOf(
+            UnblockRequest(7, "open", listOf(RequestItem("noticias.exemplo.com", "open", null), RequestItem("cdn.noticias.exemplo.com", "open", null))),
+            UnblockRequest(6, "done", listOf(RequestItem("docs.exemplo.org", "allowed", null), RequestItem("midia.exemplo.org", "allowed", 3600), RequestItem("apostas.exemplo.com", "denied", null))),
+        )
+        PinStore(ctx).set("246810")
+        a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        a.debugShowBlocked(items, reqs, "domains", setOf("cdn.video.exemplo.com", "api.video.exemplo.com"))
+        shot(a, "08-liberacoes-sites")
+        a.debugShowBlocked(items, reqs, "requests")
+        shot(a, "09-liberacoes-pedidos")
+        a.debugShowBlocked(items, emptyList(), "apps")
+        shot(a, "10-liberacoes-apps")
     }
 }
