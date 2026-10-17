@@ -457,7 +457,9 @@ class MainActivity : Activity() {
         val now = System.currentTimeMillis() / 1000
         val open = requests.filter { it.status == "open" }
         val openDomains = open.flatMap { r -> r.items.filter { it.state == "open" }.map { it.domain } }.toSet()
-        val fresh = items.filter { it.domain !in openDomains }
+        // O canário é o teste de saúde do filtro: bloqueado de propósito, nunca é pedido de liberação.
+        val canary = config.canary.trim().lowercase().trimEnd('.')
+        val fresh = items.filter { it.domain !in openDomains && it.domain != canary }
         picked.retainAll(fresh.map { it.domain }.toSet())
         if (fresh.isEmpty()) box.addView(cardView("Nada bloqueado nas últimas 24 horas."))
         for (b in fresh.take(60)) {
