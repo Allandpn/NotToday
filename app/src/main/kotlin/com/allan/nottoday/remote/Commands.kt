@@ -33,20 +33,23 @@ class Window(val days: List<Int>, val from: Int, val to: Int, val utcOffsetMin: 
 }
 
 /**
- * `role`: "admin" ou "domains" (veja docs/PAPEIS.md no guardian). Pareamentos antigos, sem papel, são de guardiões-mor.
+ * `role`: "master", "admin" ou "domains" (veja docs/PAPEIS.md no guardian). Pareamentos antigos, sem papel, são de guardiões-mor.
  * `allowSync` false: só vale passkey presa ao aparelho (flag BE ausente). `window`: horário de validade. Os dois são definidos
  * quando o guardião é criado e não mudam.
  */
 class Guardian(
     val name: String,
     val creds: MutableMap<String, String> = LinkedHashMap(),
-    val role: String = Commands.ROLE_ADMIN,
+    var role: String = Commands.ROLE_ADMIN,
     val allowSync: Boolean = true,
     val window: Window? = null,
 )
 
 class Trust(val rpId: String, val origin: String, val guardians: MutableMap<String, Guardian> = LinkedHashMap()) {
-    fun admins(): Set<String> = guardians.filterValues { it.role == Commands.ROLE_ADMIN }.keys
+    /** Guardiões com poderes de guardião-mor (inclui o mestre). */
+    fun admins(): Set<String> = guardians.filterValues { it.role in Commands.ADMINISH }.keys
+
+    fun masters(): Set<String> = guardians.filterValues { it.role == Commands.ROLE_MASTER }.keys
 
     fun toJson(): Map<String, Any?> = linkedMapOf(
         "rp_id" to rpId, "origin" to origin,
@@ -87,12 +90,17 @@ object Commands {
     const val T_ADD_CREDENTIAL = "add_credential"
     const val T_REMOVE_GUARDIAN = "remove_guardian"
     const val T_REMOVE_CREDENTIAL = "remove_credential"
+    const val T_SET_ROLE = "set_role"
     const val FLAG_BE = 0x08 // backup eligible: a passkey pode ser copiada para a nuvem
-    val TRUST_TYPES = setOf(T_ADD_GUARDIAN, T_ADD_CREDENTIAL, T_REMOVE_GUARDIAN, T_REMOVE_CREDENTIAL)
-    val TWO_SIG_TYPES = setOf(T_REMOVE_GUARDIAN, T_REMOVE_CREDENTIAL)
+    val TRUST_TYPES = setOf(T_ADD_GUARDIAN, T_ADD_CREDENTIAL, T_REMOVE_GUARDIAN, T_REMOVE_CREDENTIAL, T_SET_ROLE)
+
+    /** Dois guardiões-mor, enquanto não existe mestre (modo antigo). Com o mestre como autor, basta ele. */
+    val TWO_SIG_TYPES = setOf(T_REMOVE_GUARDIAN, T_REMOVE_CREDENTIAL, T_SET_ROLE)
+    const val ROLE_MASTER = "master" // inclui e remove guardiões (inclusive outro mestre), sozinho; tem tudo do guardião-mor
     const val ROLE_ADMIN = "admin"
     const val ROLE_DOMAINS = "domains"
-    val ROLES = setOf(ROLE_ADMIN, ROLE_DOMAINS)
+    val ROLES = setOf(ROLE_MASTER, ROLE_ADMIN, ROLE_DOMAINS)
+    val ADMINISH = setOf(ROLE_MASTER, ROLE_ADMIN)
     val DOMAIN_TYPES = setOf("pihole_allow", "pihole_deny", "pihole_remove", "pihole_batch")
 
     /** O que um guardião comum pode mandar: domínios e aprovar/revogar app (regras, PIN e pessoas são do guardião-mor). */
@@ -150,8 +158,11 @@ object Commands {
         return signers
     }
 
-    /** Quantos guardiões-mor precisam assinar. */
-    fun requiredSigners(trust: Trust, type: String): Int = if (type in TWO_SIG_TYPES && trust.admins().size >= 2) 2 else 1
+    /** Quantos guardiões-mor precisam assinar: se o autor é o mestre, ele basta; senão vale o modo antigo (dois, se houver dois). */
+    fun requiredSigners(trust: Trust, cmd: Command): Int {
+        if (trust.guardians[cmd.guardian]?.role == ROLE_MASTER) return 1
+        return if (cmd.type in TWO_SIG_TYPES && trust.admins().size >= 2) 2 else 1
+    }
 
     /**
      * O autor pode mandar este comando? Guardião: domínios, aprovar app e passkey nova para si mesmo. A janela de horário do autor
@@ -161,11 +172,20 @@ object Commands {
         val author = trust.guardians[cmd.guardian] ?: throw CommandException("autor desconhecido")
         if (author.window?.contains(nowMs) == false) throw CommandException("fora da janela de horário deste guardião")
         if (cmd.type in GUARDIAN_TYPES) return
-        if (author.role != ROLE_ADMIN) {
-            if (cmd.type == T_ADD_CREDENTIAL && cmd.args["id"] == cmd.guardian) return
-            throw CommandException("o guardião não pode mandar este comando")
+        if (cmd.type == T_ADD_CREDENTIAL && cmd.args["id"] == cmd.guardian) return // qualquer guardião inclui passkey para si mesmo
+        if (author.role !in ADMINISH) throw CommandException("o guardião não pode mandar este comando")
+        if (cmd.type in TRUST_TYPES && author.role != ROLE_MASTER) {
+            val target = trust.guardians[cmd.args["id"]]?.role
+            val promotion = cmd.type == T_SET_ROLE && cmd.args["role"] == ROLE_MASTER
+            // Sem mestre: modo antigo, e a única mudança de papel é promover um guardião-mor a mestre. Com mestre, a promoção que
+            // ainda está em andamento em outros destinos continua valendo (o alvo já é mestre aqui).
+            if (trust.masters().isNotEmpty()) {
+                if (!(promotion && target == ROLE_MASTER)) throw CommandException("só o guardião-mestre inclui, remove ou muda guardiões")
+            } else if (cmd.type == T_SET_ROLE && !(promotion && target == ROLE_ADMIN)) {
+                throw CommandException("sem mestre, só dá para promover um guardião-mor a mestre")
+            }
         }
-        if ((signers intersect trust.admins()).size < requiredSigners(trust, cmd.type)) throw CommandException("faltam assinaturas de outro guardião-mor")
+        if ((signers intersect trust.admins()).size < requiredSigners(trust, cmd)) throw CommandException("faltam assinaturas de outro guardião-mor")
     }
 
     /** Criptografia e quórum. Contador e destino são conferidos pelo [Consumer]. */
@@ -219,8 +239,16 @@ class Consumer(val dev: String, val trust: Trust, val lastCtr: MutableMap<String
                 val id = s("id")
                 if (id !in trust.guardians) throw CommandException("guardião inexistente")
                 if (trust.admins() == setOf(id)) throw CommandException("não remove o último guardião-mor")
+                if (trust.masters() == setOf(id)) throw CommandException("não remove o último mestre")
                 trust.guardians.remove(id)
                 lastCtr.remove(id)
+            }
+            Commands.T_SET_ROLE -> {
+                val id = s("id")
+                val g = trust.guardians[id] ?: throw CommandException("guardião inexistente")
+                val role = Commands.role(a["role"])
+                if (trust.masters() == setOf(id) && role != Commands.ROLE_MASTER) throw CommandException("não rebaixa o último mestre")
+                g.role = role
             }
             else -> throw CommandException("não é comando de confiança")
         }

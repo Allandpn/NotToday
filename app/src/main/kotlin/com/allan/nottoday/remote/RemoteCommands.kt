@@ -107,7 +107,7 @@ class RemoteCommands(
                 store.activated = true
                 "aparelho ativado pelo guardião"
             }
-            Commands.T_ADD_GUARDIAN, Commands.T_ADD_CREDENTIAL, Commands.T_REMOVE_CREDENTIAL -> {
+            Commands.T_ADD_GUARDIAN, Commands.T_ADD_CREDENTIAL, Commands.T_REMOVE_CREDENTIAL, Commands.T_SET_ROLE -> {
                 consumer.applyTrust(cmd)
                 store.saveConsumer(consumer)
                 "confiança atualizada (${cmd.type})"
@@ -204,8 +204,9 @@ class RemoteCommands(
         val id = cmd.args["id"] as? String ?: throw CommandException("id ausente")
         val target = consumer.trust.guardians[id] ?: throw CommandException("guardião inexistente")
         if (consumer.trust.admins() == setOf(id)) throw CommandException("não remove o último guardião-mor")
+        if (consumer.trust.masters() == setOf(id)) throw CommandException("não remove o último mestre")
         // Tirar um guardião só reduz quem manda: vale na hora. Tirar um guardião-mor passa pelo atraso.
-        if (!gateOn() || target.role != Commands.ROLE_ADMIN) {
+        if (!gateOn() || target.role !in Commands.ADMINISH) {
             consumer.applyTrust(cmd)
             store.saveConsumer(consumer)
             return "guardião removido: $id"

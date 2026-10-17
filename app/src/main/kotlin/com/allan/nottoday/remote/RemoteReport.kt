@@ -76,6 +76,7 @@ object RemoteReport {
             "approvedApps" to approved,
             "pkgNames" to pkgNames,
             "trust" to consumer.trust.guardians.mapValues { (_, g) -> g.creds.keys.sorted() },
+            "roles" to consumer.trust.guardians.mapValues { (_, g) -> g.role },
             "ctrs" to consumer.lastCtr,
             "executed" to executed.takeLast(50),
         )

@@ -195,6 +195,51 @@ class JsonTest {
     }
 
     @Test
+    fun masterRoleManagesGuardiansAloneAndOthersCannot() {
+        val rp = "gw.example"
+        val origin = "https://gw.example"
+        val dev = "devdevdevdevdevdevdev"
+        val mst = FakePasskey(rp, origin)
+        val mor = FakePasskey(rp, origin)
+        val com = FakePasskey(rp, origin)
+        fun g(k: FakePasskey, role: String) = Guardian("x", linkedMapOf(k.credIdB64 to k.spkiB64), role)
+        fun trust() = Trust(rp, origin, linkedMapOf("g_mst" to g(mst, "master"), "g_mor" to g(mor, "admin"), "g_com" to g(com, "domains")))
+        var ctr = 0L
+        fun send(t: Trust, author: String, k: FakePasskey, type: String, args: Map<String, Any?>, vararg more: Pair<String, FakePasskey>) {
+            ctr++
+            val p = payloadOf(dev, author, ctr, type, args)
+            Commands.verifyEnvelope(t, envelopeOf(p, k.sign(author, p), *more.map { it.second.sign(it.first, p) }.toTypedArray()))
+        }
+        val add = mapOf("id" to "g_n", "name" to "N", "cred" to "c", "spki" to "s", "role" to "master", "allow_sync" to true)
+        val t = trust()
+        send(t, "g_mst", mst, "add_guardian", add) // o mestre inclui outro mestre, sozinho
+        send(t, "g_mst", mst, "remove_guardian", mapOf("id" to "g_mor"))
+        send(t, "g_mst", mst, "set_config", mapOf("patch" to emptyMap<String, Any?>())) // e tem tudo do guardião-mor
+        send(t, "g_mor", mor, "set_config", mapOf("patch" to emptyMap<String, Any?>()))
+        send(t, "g_mor", mor, "add_credential", mapOf("id" to "g_mor", "cred" to "c2", "spki" to "s2")) // a própria passkey
+        for ((type, args) in listOf("add_guardian" to add, "remove_guardian" to mapOf("id" to "g_mst"), "set_role" to mapOf("id" to "g_mor", "role" to "master"),
+            "add_credential" to mapOf("id" to "g_com", "cred" to "c", "spki" to "s"), "remove_credential" to mapOf("id" to "g_com", "cred" to "c"))) {
+            assertThrows(type, CommandException::class.java) { send(t, "g_mor", mor, type, args) }
+            assertThrows("$type com 2 assinaturas", CommandException::class.java) { send(t, "g_mor", mor, type, args, "g_mst" to mst) }
+        }
+        assertThrows(CommandException::class.java) { send(t, "g_com", com, "remove_guardian", mapOf("id" to "g_mst")) }
+        // o último mestre não sai nem é rebaixado
+        val c = Consumer(dev, trust())
+        c.applyTrust(Command(dev, "g_mst", 1, "remove_guardian", mapOf("id" to "g_mor")))
+        assertThrows(CommandException::class.java) { c.applyTrust(Command(dev, "g_mst", 2, "remove_guardian", mapOf("id" to "g_mst"))) }
+        assertThrows(CommandException::class.java) { c.applyTrust(Command(dev, "g_mst", 3, "set_role", mapOf("id" to "g_mst", "role" to "admin"))) }
+        // sem mestre: dois guardiões-mor promovem um deles; uma assinatura só não basta
+        val old = Trust(rp, origin, linkedMapOf("g_mor" to g(mor, "admin"), "g_b" to g(mst, "admin")))
+        val promo = mapOf("id" to "g_b", "role" to "master")
+        assertThrows(CommandException::class.java) { send(old, "g_mor", mor, "set_role", promo) }
+        send(old, "g_mor", mor, "set_role", promo, "g_b" to mst)
+        assertThrows(CommandException::class.java) { send(old, "g_mor", mor, "set_role", mapOf("id" to "g_b", "role" to "domains"), "g_b" to mst) }
+        val c2 = Consumer(dev, old)
+        c2.applyTrust(Command(dev, "g_mor", 1, "set_role", promo))
+        assertEquals("master", old.guardians["g_b"]!!.role)
+    }
+
+    @Test
     fun windowValidationAndTrustPolicyAreFixedAtCreation() {
         for (bad in listOf("""{"days":[],"from":0,"to":10,"utc_offset_min":0}""", """{"days":[7],"from":0,"to":10,"utc_offset_min":0}""",
             """{"days":[1],"from":600,"to":600,"utc_offset_min":0}""", """{"days":[1],"from":0,"to":1441,"utc_offset_min":0}""",

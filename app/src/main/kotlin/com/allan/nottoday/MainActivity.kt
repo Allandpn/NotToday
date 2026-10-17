@@ -17,6 +17,7 @@ import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import com.allan.nottoday.remote.DomainEdit
 import com.allan.nottoday.remote.BlockedItem
 import com.allan.nottoday.remote.CommandException
 import com.allan.nottoday.remote.AppAsk
@@ -60,6 +61,7 @@ class MainActivity : Activity() {
     private val pickedApps = linkedSetOf<String>()
     private var showAds = false
     private val picked = linkedSetOf<String>()
+    private val depth = HashMap<String, Int>()  // domínio bloqueado -> quantos rótulos foram tirados antes de pedir
     private var page: String? = null                 // subtela das configurações (null = início)
     private var draft: MutableMap<String, String>? = null  // alterações ainda não salvas
     private lateinit var saveBarView: LinearLayout
@@ -475,6 +477,64 @@ class MainActivity : Activity() {
         )
     }
 
+    /** Linha de um site bloqueado. « tira o rótulo da esquerda (até o domínio principal) e » devolve; o pedido vai com o domínio mostrado. */
+    private fun siteRow(b: BlockedItem, baseSummary: String) {
+        val levels = DomainEdit.levels(b.domain)
+        val info = twoLine(b.domain, baseSummary)
+        val titleTv = info.getChildAt(0) as TextView
+        val sumTv = info.getChildAt(1) as TextView
+        val cb = android.widget.CheckBox(this).apply {
+            isChecked = b.domain in picked
+            buttonTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.nt_green))
+            isClickable = false
+            isFocusable = false
+        }
+        fun small(label: String, desc: String) = Button(this).apply {
+            text = label
+            contentDescription = desc
+            isAllCaps = false
+            textSize = 18f
+            setTextColor(getColor(R.color.nt_text))
+            setBackgroundResource(R.drawable.btn_secondary)
+            minWidth = dp(44)
+            minimumWidth = dp(44)
+            minHeight = dp(48)
+            minimumHeight = dp(48)
+            setPadding(0, 0, 0, 0)
+        }
+        val less = small("«", "Encurtar o domínio")
+        val more = small("»", "Voltar ao domínio completo")
+        fun refresh() {
+            val i = depth[b.domain] ?: 0
+            titleTv.text = levels[i]
+            sumTv.text = if (i > 0) "vale também para os subdomínios · era ${b.domain}\n$baseSummary" else baseSummary
+            less.isEnabled = i < levels.size - 1
+            more.isEnabled = i > 0
+            less.alpha = if (less.isEnabled) 1f else 0.3f
+            more.alpha = if (more.isEnabled) 1f else 0.3f
+        }
+        less.setOnClickListener { depth[b.domain] = (depth[b.domain] ?: 0) + 1; refresh() }
+        more.setOnClickListener { depth[b.domain] = (depth[b.domain] ?: 1) - 1; refresh() }
+        refresh()
+        content.addView(
+            LinearLayout(this).apply {
+                tag = SettingsPage.ROW
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                minimumHeight = dp(64)
+                setPadding(dp(16), dp(8), dp(8), dp(8))
+                touchable()
+                setOnClickListener { cb.toggle(); if (cb.isChecked) picked.add(b.domain) else picked.remove(b.domain); refreshBar() }
+                addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                if (levels.size > 1) {
+                    addView(less)
+                    addView(more)
+                }
+                addView(cb)
+            },
+        )
+    }
+
     private fun drawSites(d: BlockedData) {
         val now = System.currentTimeMillis() / 1000
         val openDomains = d.requests.filter { it.status == "open" }.flatMap { r -> r.items.filter { it.state == "open" }.map { it.domain } }.toSet()
@@ -498,11 +558,11 @@ class MainActivity : Activity() {
             val older = fresh.filter { now - it.last > 900 }.take(60)
             if (recent.isNotEmpty()) {
                 section("Agora · últimos 15 min")
-                recent.take(60).forEach { b -> pickRow(b.domain, summary(b), b.domain in picked) { if (it) picked.add(b.domain) else picked.remove(b.domain) } }
+                recent.take(60).forEach { b -> siteRow(b, summary(b)) }
             }
             if (older.isNotEmpty()) {
                 section("Antes · últimas 24 h")
-                older.forEach { b -> pickRow(b.domain, summary(b), b.domain in picked) { if (it) picked.add(b.domain) else picked.remove(b.domain) } }
+                older.forEach { b -> siteRow(b, summary(b)) }
             }
             section("Lista")
             button("Selecionar os mais recentes", summary = "Até $MAX_ASK de uma vez") {
@@ -610,7 +670,8 @@ class MainActivity : Activity() {
     private fun sendPicked() {
         val api = unblockApi()?.first ?: return
         val sites = barMode == "sites"
-        val chosen = (if (sites) picked.toList() else pickedApps.toList()).take(MAX_ASK)
+        // Nos sites vai o domínio como foi encurtado na lista (dois bloqueios do mesmo site viram um pedido só).
+        val chosen = (if (sites) picked.map { DomainEdit.levels(it).getOrElse(depth[it] ?: 0) { _ -> it } }.distinct() else pickedApps.toList()).take(MAX_ASK)
         if (chosen.isEmpty()) return
         runAsync {
             val msg = try {
@@ -622,6 +683,7 @@ class MainActivity : Activity() {
                 remote.watched = remote.watched + api.requests().filter { it.status == "open" }.map { it.id }
                 picked.clear()
                 pickedApps.clear()
+                depth.clear()
                 "Pedido enviado. Mande o link ao guardião."
             } catch (e: Exception) {
                 "Não foi possível pedir: ${e.message ?: e.javaClass.simpleName}"
