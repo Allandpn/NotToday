@@ -93,6 +93,7 @@ object UnblockText {
         "open" -> "aguardando"
         "allowed" -> if (i.ttlS == null) "liberado" else "liberado por ${ttl(i.ttlS)}"
         "denied" -> "negado"
+        "failed" -> "não aplicado (peça de novo)"
         else -> "cancelado"
     }
 
