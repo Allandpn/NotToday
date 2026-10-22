@@ -576,7 +576,7 @@ class MainActivity : Activity() {
             section("Lista")
             button("Selecionar os mais recentes", summary = "Até $MAX_ASK de uma vez") {
                 picked.clear()
-                picked.addAll(fresh.take(MAX_ASK).map { it.domain })
+                picked.addAll(fresh.filter { it.own }.take(MAX_ASK).map { it.domain })
                 render()
             }
             button("Esconder desta lista", summary = "Só tira daqui o que já apareceu. O guardião continua vendo o registro dele.") {
