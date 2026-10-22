@@ -524,13 +524,22 @@ class MainActivity : Activity() {
                 minimumHeight = dp(64)
                 setPadding(dp(16), dp(8), dp(8), dp(8))
                 touchable()
-                setOnClickListener { cb.toggle(); if (cb.isChecked) picked.add(b.domain) else picked.remove(b.domain); refreshBar() }
+                // Bloqueio de lista é só para ver: o gateway recusa o pedido e quem libera é o guardião, à mão.
+                if (b.own) setOnClickListener { cb.toggle(); if (cb.isChecked) picked.add(b.domain) else picked.remove(b.domain); refreshBar() }
                 addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                if (levels.size > 1) {
+                if (b.own && levels.size > 1) {
                     addView(less)
                     addView(more)
                 }
-                addView(cb)
+                if (b.own) addView(cb) else addView(
+                    TextView(this@MainActivity).apply {
+                        text = "só ver"
+                        textSize = 12f
+                        alpha = 0.6f
+                        setTextColor(getColor(R.color.nt_text))
+                        setPadding(dp(8), 0, dp(8), 0)
+                    },
+                )
             },
         )
     }
