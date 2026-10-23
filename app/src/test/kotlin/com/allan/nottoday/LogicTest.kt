@@ -8,6 +8,13 @@ import org.junit.Test
 import java.io.ByteArrayOutputStream
 
 class LogicTest {
+    @Test
+    fun torrentCatalogNeverTouchesTheAppsThatHoldTheFilter() {
+        assertTrue(Catalog.torrentPackages.isNotEmpty())
+        assertTrue(Catalog.TAILSCALE_PKG !in Catalog.torrentPackages)
+        assertEquals(Catalog.torrentPackages.size, Catalog.torrentPackages.toSet().size)
+    }
+
     // --- Gate --------------------------------------------------------------------
 
     @Test

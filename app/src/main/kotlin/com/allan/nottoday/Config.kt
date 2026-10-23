@@ -90,6 +90,21 @@ object Catalog {
         "com.samsung.android.packageinstaller",
     )
 
+    /**
+     * Clientes de torrent conhecidos. Ficam sempre suspensos, mesmo aprovados: aprovar um app não libera torrent.
+     * Apps com "torrent" no nome ou no pacote também entram (ver PackageGuard.torrentApps).
+     */
+    val torrentPackages = listOf(
+        "com.utorrent.client",
+        "com.utorrent.client.pro",
+        "com.bittorrent.client",
+        "com.bittorrent.client.pro",
+        "org.proninyaroslav.libretorrent",
+        "com.delphicoder.flud",
+        "com.delphicoder.flud.paid",
+        "com.frostwire.android",
+    )
+
     const val TAILSCALE_PKG = "com.tailscale.ipn"
 }
 

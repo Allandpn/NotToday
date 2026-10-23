@@ -46,6 +46,12 @@ object PackageGuard {
             .filter { (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0 && it.packageName != context.packageName }
             .map { it.packageName }.sorted()
 
+    /** Clientes de torrent instalados: lista conhecida ou "torrent" no nome/pacote. Nunca liberados por aprovação. */
+    fun torrentApps(context: Context): List<String> =
+        userApps(context).filter { pkg ->
+            pkg in Catalog.torrentPackages || "torrent" in (label(context, pkg) + " " + pkg).lowercase()
+        }
+
     /** Apps de usuário ainda não aprovados. Vazio enquanto a base não foi definida (evita suspender tudo no 1º uso). */
     fun pending(context: Context): List<String> {
         val approved = Approved(context)
@@ -66,6 +72,7 @@ object PackageGuard {
         val out = mutableListOf<String>()
         KNOWN_RISK[pkg]?.let { out += it }
         val name = (label(context, pkg) + " " + pkg).lowercase()
+        if (pkg in Catalog.torrentPackages || "torrent" in name) out += "torrent (fica bloqueado)"
         if (KEYWORDS.any { it in name }) out += "nome sugere VPN/torrent/anônimo"
         if (pkg in Browsers.installed(context)) out += if (pkg == "com.android.chrome") "navegador" else "navegador sem bloqueio de acesso por IP"
         try {

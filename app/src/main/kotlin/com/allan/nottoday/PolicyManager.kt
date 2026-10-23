@@ -170,12 +170,13 @@ class PolicyManager(private val context: Context) {
         return (Catalog.storePackages + config.extraStores).distinct().filter { it in installed }
     }
 
-    /** Tudo que deve estar suspenso agora: lojas alternativas, apps marcados sem filtro e apps novos sem aprovação. */
+    /** Tudo que deve estar suspenso agora: lojas alternativas, apps marcados sem filtro, apps novos sem aprovação e torrent. */
     private fun desiredSuspended(maintenanceWindow: Boolean): Set<String> {
         val d = mutableSetOf<String>()
         if (config.suspendBlocked && !maintenanceWindow) d += installedStores()
         if (config.dnsFilterEnabled && config.browsersNeedFilter && !filterActive()) d += Routing.routed(context, config)
         if (config.newAppsDeny) d += PackageGuard.pending(context)
+        d += PackageGuard.torrentApps(context)
         d -= context.packageName
         d -= Catalog.TAILSCALE_PKG
         return d
