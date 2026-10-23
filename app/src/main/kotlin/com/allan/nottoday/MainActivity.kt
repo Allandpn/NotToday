@@ -59,7 +59,6 @@ class MainActivity : Activity() {
     private lateinit var requestBarView: LinearLayout
     private val requestLabel by lazy { TextView(this) }
     private val pickedApps = linkedSetOf<String>()
-    private var showAds = false
     private val picked = linkedSetOf<String>()
     private val depth = HashMap<String, Int>()  // domínio bloqueado -> quantos rótulos foram tirados antes de pedir
     private var page: String? = null                 // subtela das configurações (null = início)
@@ -389,12 +388,11 @@ class MainActivity : Activity() {
         val api = unblockApi()?.first ?: return
         if (blockedLoading) return
         blockedLoading = true
-        val onlyOwn = !showAds
         runAsync(onDone = { blockedLoading = false }) {
             var data: BlockedData? = null
             var err: String? = null
             try {
-                val items = api.blocked(onlyOwn)
+                val items = api.blocked()
                 val reqs = api.requests()
                 val refused = try { api.refusedApps() } catch (_: Exception) { emptySet() }
                 data = BlockedData(items, reqs, refused)
@@ -533,7 +531,7 @@ class MainActivity : Activity() {
                 }
                 if (b.own) addView(cb) else addView(
                     TextView(this@MainActivity).apply {
-                        text = "só ver"
+                        text = if (b.veto) "vetado" else "só ver"
                         textSize = 12f
                         alpha = 0.6f
                         setTextColor(getColor(R.color.nt_text))
@@ -553,15 +551,16 @@ class MainActivity : Activity() {
         picked.retainAll(fresh.map { it.domain }.toSet())
 
         section("O que aparece aqui")
-        text("Marque o que você tentou abrir e peça a liberação. O guardião decide pelo site.")
-        switchRow("Mostrar também anúncios e rastreadores", showAds, "Inclui o que as listas de anúncios bloquearam.").apply {
-            setOnCheckedChangeListener { _, on -> showAds = on; blockedData = null; render(); loadBlocked() }
-        }
+        text("Aparece tudo que foi bloqueado, com o motivo. Marque o que você tentou abrir e peça a liberação; o guardião decide pelo site. O que diz \"lista\" ou \"vetado\" não pode ser pedido.")
         if (fresh.isEmpty()) {
             section("Bloqueado")
             text("Nada bloqueado nas últimas 24 horas. Tente abrir o site de novo e volte aqui.")
         } else {
-            fun source(b: BlockedItem) = if (b.own) "regra própria" else b.list.ifEmpty { "lista" }.substringAfter("://").substringBefore('/')
+            fun source(b: BlockedItem) = when {
+                b.own -> "regra própria"
+                b.veto -> "vetado pelo guardião-mor (${b.list})"
+                else -> "lista " + b.list.ifEmpty { "do Pi-hole" }.substringAfter("://").substringBefore('/')
+            }
             fun summary(b: BlockedItem) = "${b.count} vez${if (b.count > 1) "es" else ""} · ${UnblockText.ago(now, b.last)} · ${source(b)}"
             val recent = fresh.filter { now - it.last <= 900 }
             val older = fresh.filter { now - it.last > 900 }.take(60)
