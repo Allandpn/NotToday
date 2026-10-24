@@ -531,7 +531,7 @@ class MainActivity : Activity() {
                 }
                 if (b.own) addView(cb) else addView(
                     TextView(this@MainActivity).apply {
-                        text = if (b.veto) "vetado" else "só ver"
+                        text = if (b.veto) "vetado" else "bloqueado por lista"
                         textSize = 12f
                         alpha = 0.6f
                         setTextColor(getColor(R.color.nt_text))
@@ -551,7 +551,7 @@ class MainActivity : Activity() {
         picked.retainAll(fresh.map { it.domain }.toSet())
 
         section("O que aparece aqui")
-        text("Aparece tudo que foi bloqueado, com o motivo. Marque o que você tentou abrir e peça a liberação; o guardião decide pelo site. O que diz \"lista\" ou \"vetado\" não pode ser pedido.")
+        text("Itens sem caixa de marcar não podem ser pedidos por aqui. Se achar que é um erro, fale com o guardião.")
         if (fresh.isEmpty()) {
             section("Bloqueado")
             text("Nada bloqueado nas últimas 24 horas. Tente abrir o site de novo e volte aqui.")
@@ -559,7 +559,7 @@ class MainActivity : Activity() {
             fun source(b: BlockedItem) = when {
                 b.own -> "regra própria"
                 b.veto -> "vetado pelo guardião-mor (${b.list})"
-                else -> "lista " + b.list.ifEmpty { "do Pi-hole" }.substringAfter("://").substringBefore('/')
+                else -> "lista " + b.list.ifEmpty { "do Pi-hole" }.let { if ("://" in it) it.substringAfter("://").substringBefore('/') else it }
             }
             fun summary(b: BlockedItem) = "${b.count} vez${if (b.count > 1) "es" else ""} · ${UnblockText.ago(now, b.last)} · ${source(b)}"
             val recent = fresh.filter { now - it.last <= 900 }
