@@ -74,6 +74,7 @@ object RemoteReport {
             "groups" to described["groups"],
             "hints" to described["hints"],
             "approvedApps" to approved,
+            "installedApps" to PackageGuard.installedForReport(context),
             "pkgNames" to pkgNames,
             "trust" to consumer.trust.guardians.mapValues { (_, g) -> g.creds.keys.sorted() },
             "roles" to consumer.trust.guardians.mapValues { (_, g) -> g.role },

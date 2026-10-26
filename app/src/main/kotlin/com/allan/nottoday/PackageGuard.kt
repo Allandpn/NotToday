@@ -61,6 +61,15 @@ object PackageGuard {
         pkg
     }
 
+    private val SAFE_PKG = Regex("[A-Za-z0-9._]{1,200}")
+
+    /** Lista para o relatório: apps de usuário e de launcher (aprovados, pendentes e suspensos), sem apps de sistema invisíveis. */
+    fun installedForReport(context: Context, max: Int = 400): List<Map<String, String>> =
+        (userApps(context) + launcherApps(context)).distinct().filter { SAFE_PKG.matches(it) }
+            .map { it to label(context, it).take(60) }
+            .sortedBy { it.second.lowercase() }.take(max)
+            .map { mapOf("pkg" to it.first, "label" to it.second) }
+
     /** Motivos pelos quais o app merece atenção na hora de aprovar (vazio = nada de especial). */
     fun risks(context: Context, pkg: String): List<String> {
         val out = mutableListOf<String>()

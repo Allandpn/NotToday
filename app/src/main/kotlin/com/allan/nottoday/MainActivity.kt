@@ -29,6 +29,7 @@ import com.allan.nottoday.remote.Pairing
 import com.allan.nottoday.remote.RemoteChannel
 import com.allan.nottoday.remote.RemoteStore
 import com.allan.nottoday.remote.GatewayApi
+import com.allan.nottoday.remote.GatewayException
 import com.allan.nottoday.remote.DeviceKey
 import com.allan.nottoday.remote.DevAuth
 
@@ -693,6 +694,12 @@ class MainActivity : Activity() {
                 pickedApps.clear()
                 depth.clear()
                 "Pedido enviado. Mande o link ao guardião."
+            } catch (e: GatewayException) {
+                if (e.status == 403 && !sites) {
+                    "Não foi possível pedir: este app foi vetado pelo guardião-mor e não pode ser pedido."
+                } else {
+                    "Não foi possível pedir: ${e.message ?: e.javaClass.simpleName}"
+                }
             } catch (e: Exception) {
                 "Não foi possível pedir: ${e.message ?: e.javaClass.simpleName}"
             }
