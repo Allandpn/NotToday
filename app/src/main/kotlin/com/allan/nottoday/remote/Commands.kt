@@ -81,7 +81,7 @@ class Trust(val rpId: String, val origin: String, val guardians: MutableMap<Stri
 
 class Command(val dev: String, val guardian: String, val ctr: Long, val type: String, val args: Map<String, Any?>)
 
-class InstallArgs(val pkg: String, val sha256: String, val size: Long, val versionName: String?, val versionCode: Long?)
+class InstallArgs(val pkg: String, val sha256: String, val size: Long)
 
 class Verified(val cmd: Command, val payload: ByteArray, val signers: Set<String>)
 
@@ -112,10 +112,10 @@ object Commands {
     /** O que um guardião comum pode mandar: domínios e aprovar/revogar app (regras, PIN e pessoas são do guardião-mor). */
     val GUARDIAN_TYPES = DOMAIN_TYPES + setOf("approve_app", "revoke_app")
 
-    private val INSTALL_KEYS = setOf("pkg", "sha256", "size", "version_name", "version_code")
+    private val INSTALL_KEYS = setOf("pkg", "sha256", "size")
     private val INSTALL_PKG = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")
     private val SHA256_HEX = Regex("^[0-9a-f]{64}$")
-    const val MAX_APK_BYTES = 1L shl 30
+    const val MAX_APK_BYTES = 150L shl 20 // 150 MiB, o mesmo limite do Pi
 
     /** Argumentos de `install_app`; qualquer coisa fora do formato é recusada (espelha `check_install_args` do Python). */
     fun checkInstallArgs(a: Map<String, Any?>): InstallArgs {
@@ -126,11 +126,7 @@ object Commands {
         if (sha == null || !SHA256_HEX.matches(sha)) throw CommandException("sha256 inválido")
         val size = a["size"] as? Long
         if (size == null || size < 1 || size > MAX_APK_BYTES) throw CommandException("tamanho inválido")
-        val name = a["version_name"]
-        if (name != null && (name !is String || name.length > 64)) throw CommandException("version_name inválido")
-        val code = a["version_code"]
-        if (code != null && (code !is Long || code < 0)) throw CommandException("version_code inválido")
-        return InstallArgs(pkg, sha, size, name as String?, code as Long?)
+        return InstallArgs(pkg, sha, size)
     }
 
     fun bool(b: Any?): Boolean = b as? Boolean ?: throw CommandException("valor lógico inválido")

@@ -39,8 +39,7 @@ class InstallAppTest {
     @Test
     fun onlyTheMasterMayInstall() {
         accept("master")
-        accept("master", a = args("version_name" to "1.2.0", "version_code" to 12L))
-        for (role in listOf("admin", "domains")) {
+                for (role in listOf("admin", "domains")) {
             val e = assertThrows(CommandException::class.java) { accept(role) }
             assertTrue(e.message, "mestre" in e.message!!)
         }
@@ -60,7 +59,7 @@ class InstallAppTest {
         val bad = listOf(
             args("sha256" to "A".repeat(64)), args("sha256" to "a".repeat(63)), args("pkg" to "semponto"),
             args("pkg" to "com.exemplo; rm"), args("size" to 0L), args("size" to "10"), args("size" to Commands.MAX_APK_BYTES + 1),
-            args("version_code" to -1L), args("version_name" to 3L), args("extra" to "x"),
+            args("version_code" to 12L), args("version_name" to "1.2.0"), args("extra" to "x"),
             args().filterKeys { it != "pkg" },
         )
         for (a in bad) assertThrows(a.toString(), CommandException::class.java) { accept("master", a = a) }
@@ -97,7 +96,7 @@ class InstallAppTest {
         env: InstallEnv, hash: String = bodySha, size: Long = body.size.toLong(), served: ByteArray = body, fail: GatewayException? = null,
         sleeps: MutableList<Long> = ArrayList(),
     ): String {
-        val a = Commands.checkInstallArgs(mapOf("pkg" to "com.exemplo.app", "sha256" to hash, "size" to size, "version_name" to "1.2.0"))
+        val a = Commands.checkInstallArgs(mapOf("pkg" to "com.exemplo.app", "sha256" to hash, "size" to size))
         val fetch = { _: String, dest: File, _: Long ->
             fail?.let { throw it }
             dest.writeBytes(served)

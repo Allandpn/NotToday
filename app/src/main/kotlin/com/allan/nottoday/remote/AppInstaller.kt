@@ -60,7 +60,7 @@ class AppInstaller(
             }
             if (self) store.setPendingSelfInstall(null)
             store.setCertPin(a.pkg, info.certs.sorted().joinToString(","))
-            return "instalado ${a.pkg} ${a.versionName ?: info.versionName ?: info.versionCode}"
+            return "instalado ${a.pkg} ${info.versionName ?: info.versionCode}"
         } finally {
             file.delete()
         }
@@ -110,8 +110,8 @@ class AppInstaller(
     }
 
     companion object {
-        private const val NOT_YET_TRIES = 6
-        private const val NOT_YET_WAIT_MS = 15_000L
+        private const val NOT_YET_TRIES = 3
+        private const val NOT_YET_WAIT_MS = 10_000L
 
         /** Uma troca do próprio app está esperando o instalador (o processo morre quando ela acontece). */
         @Volatile private var inFlight = false
