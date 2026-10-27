@@ -48,6 +48,19 @@ class RemoteStore(context: Context) {
         get() = prefs.getLong("requestsClearedId", 0L)
         set(v) = prefs.edit().putLong("requestsClearedId", v).apply()
 
+    /** Certificado (SHA-256 dos assinantes) visto na primeira instalação de cada app pelo canal; as próximas têm de ter o mesmo. */
+    fun certPin(pkg: String): String? = prefs.getString("cert_$pkg", null)
+
+    fun setCertPin(pkg: String, certs: String) = prefs.edit().putString("cert_$pkg", certs).apply()
+
+    /** Atualização do próprio NotToday em andamento (versionCode|versionName): o processo morre na troca, a 1ª inicialização depois relata. */
+    @SuppressLint("ApplySharedPref")
+    fun setPendingSelfInstall(v: String?) {
+        prefs.edit().apply { if (v == null) remove("self_install") else putString("self_install", v) }.commit()
+    }
+
+    fun pendingSelfInstall(): String? = prefs.getString("self_install", null)
+
     val isPaired: Boolean get() = registered && prefs.contains("consumer")
 
     fun consumer(): Consumer? = prefs.getString("consumer", null)?.let {

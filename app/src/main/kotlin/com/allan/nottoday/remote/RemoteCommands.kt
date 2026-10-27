@@ -19,6 +19,9 @@ class RemoteCommands(
     private val context: Context,
     private val store: RemoteStore,
     private val consumer: Consumer,
+    /** Gateway para baixar APKs (`install_app`); os testes injetam um [AppInstaller] pronto. */
+    private val api: GatewayApi? = null,
+    private val installer: AppInstaller? = null,
     /** Chave privada do aparelho (Android Keystore); os testes injetam uma chave de software. */
     private val devicePrivateKey: () -> java.security.PrivateKey = { DeviceKey.privateKey() },
 ) {
@@ -107,6 +110,7 @@ class RemoteCommands(
                 store.activated = true
                 "aparelho ativado pelo guardião"
             }
+            Commands.T_INSTALL_APP -> installApp(cmd)
             Commands.T_ADD_GUARDIAN, Commands.T_ADD_CREDENTIAL, Commands.T_REMOVE_CREDENTIAL, Commands.T_SET_ROLE -> {
                 consumer.applyTrust(cmd)
                 store.saveConsumer(consumer)
@@ -115,6 +119,15 @@ class RemoteCommands(
             Commands.T_REMOVE_GUARDIAN -> removeGuardian(cmd)
             else -> throw CommandException("comando desconhecido: ${cmd.type}")
         }
+    }
+
+    private fun installApp(cmd: Command): String {
+        val args = Commands.checkInstallArgs(cmd.args)
+        if (!policy.isDeviceOwner()) throw CommandException("instalação em silêncio exige o Device Owner")
+        val inst = installer ?: AppInstaller(
+            context, store, { path, dest, max -> (api ?: throw CommandException("sem gateway para baixar")).download(path, dest, max) },
+        )
+        return inst.install(consumer.dev, args)
     }
 
     private fun pkg(a: Map<String, Any?>): String {
