@@ -1,0 +1,54 @@
+name: Release
+
+# Ao receber um push de tag "v*", compila o APK de release assinado e cria a Release no GitHub.
+# O Pi do Guardian lê a Release (um único .apk), calcula o SHA-256 e o mestre assina install_app com ele.
+# A chave tem de ser a MESMA do app instalado: o aparelho recusa certificado diferente.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Restaurar a keystore
+        env:
+          KS_B64: ${{ secrets.NOTTODAY_KEYSTORE_BASE64 }}
+          KS_ALIAS: ${{ secrets.NOTTODAY_KEYSTORE_ALIAS }}
+          KS_PASS: ${{ secrets.NOTTODAY_KEYSTORE_SENHA }}
+        run: |
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/nottoday.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/nottoday.jks"
+            echo "storePassword=$KS_PASS"
+            echo "keyAlias=$KS_ALIAS"
+            echo "keyPassword=$KS_PASS"
+          } > keystore.properties
+
+      - name: Conferir que a tag bate com o versionName
+        run: |
+          VERSAO="${GITHUB_REF_NAME#v}"
+          grep -q "versionName = \"${VERSAO}\"" app/build.gradle.kts || { echo "versionName do build.gradle.kts não é ${VERSAO}"; exit 1; }
+
+      - name: Compilar o APK assinado
+        run: ./gradlew assembleRelease
+
+      - name: Criar a Release com um único APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSAO="${GITHUB_REF_NAME#v}"
+          cp app/build/outputs/apk/release/app-release.apk "nottoday-${VERSAO}.apk"
+          sha256sum "nottoday-${VERSAO}.apk"
+          gh release create "$GITHUB_REF_NAME" "nottoday-${VERSAO}.apk" \
+            --title "NotToday ${VERSAO}" --notes "NotToday ${VERSAO}: APK de release assinado."

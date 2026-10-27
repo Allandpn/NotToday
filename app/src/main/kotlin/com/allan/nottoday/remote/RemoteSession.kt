@@ -17,6 +17,11 @@ class RemoteSession(
     private val executed = ArrayList<Map<String, Any?>>()
     private var lastReport = 0L
 
+    init {
+        // Troca do próprio NotToday: o processo antigo morreu, quem relata é a primeira sessão do novo.
+        AppInstaller.takeSelfResult(app, store)?.let(executed::add)
+    }
+
     /** Faz o ciclo e devolve quantos comandos foram tratados. */
     fun cycle(waitS: Int): Int {
         val consumer = store.consumer() ?: throw GatewayException(0, "sem pareamento")
@@ -28,7 +33,7 @@ class RemoteSession(
         checkAnswers(dev)
         val commands = got["commands"] as? List<*> ?: return 0
         if (commands.isEmpty()) return 0
-        val runner = RemoteCommands(app, store, consumer, privateKey)
+        val runner = RemoteCommands(app, store, consumer, api, devicePrivateKey = privateKey)
         var n = 0
         for (c in commands) {
             @Suppress("UNCHECKED_CAST")

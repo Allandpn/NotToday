@@ -81,6 +81,8 @@ class Trust(val rpId: String, val origin: String, val guardians: MutableMap<Stri
 
 class Command(val dev: String, val guardian: String, val ctr: Long, val type: String, val args: Map<String, Any?>)
 
+class InstallArgs(val pkg: String, val sha256: String, val size: Long)
+
 class Verified(val cmd: Command, val payload: ByteArray, val signers: Set<String>)
 
 object Commands {
@@ -91,6 +93,7 @@ object Commands {
     const val T_REMOVE_GUARDIAN = "remove_guardian"
     const val T_REMOVE_CREDENTIAL = "remove_credential"
     const val T_SET_ROLE = "set_role"
+    const val T_INSTALL_APP = "install_app"
     const val FLAG_BE = 0x08 // backup eligible: a passkey pode ser copiada para a nuvem
     val TRUST_TYPES = setOf(T_ADD_GUARDIAN, T_ADD_CREDENTIAL, T_REMOVE_GUARDIAN, T_REMOVE_CREDENTIAL, T_SET_ROLE)
 
@@ -101,10 +104,30 @@ object Commands {
     const val ROLE_DOMAINS = "domains"
     val ROLES = setOf(ROLE_MASTER, ROLE_ADMIN, ROLE_DOMAINS)
     val ADMINISH = setOf(ROLE_MASTER, ROLE_ADMIN)
+
+    /** Só o guardião-mestre assina estes (instalar software no aparelho é o poder mais alto). */
+    val MASTER_TYPES = setOf(T_INSTALL_APP)
     val DOMAIN_TYPES = setOf("pihole_allow", "pihole_deny", "pihole_remove", "pihole_batch")
 
     /** O que um guardião comum pode mandar: domínios e aprovar/revogar app (regras, PIN e pessoas são do guardião-mor). */
     val GUARDIAN_TYPES = DOMAIN_TYPES + setOf("approve_app", "revoke_app")
+
+    private val INSTALL_KEYS = setOf("pkg", "sha256", "size")
+    private val INSTALL_PKG = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")
+    private val SHA256_HEX = Regex("^[0-9a-f]{64}$")
+    const val MAX_APK_BYTES = 150L shl 20 // 150 MiB, o mesmo limite do Pi
+
+    /** Argumentos de `install_app`; qualquer coisa fora do formato é recusada (espelha `check_install_args` do Python). */
+    fun checkInstallArgs(a: Map<String, Any?>): InstallArgs {
+        if (a.keys.any { it !in INSTALL_KEYS }) throw CommandException("argumentos de install_app inválidos")
+        val pkg = a["pkg"] as? String
+        if (pkg == null || pkg.length > 200 || !INSTALL_PKG.matches(pkg)) throw CommandException("nome de pacote inválido")
+        val sha = a["sha256"] as? String
+        if (sha == null || !SHA256_HEX.matches(sha)) throw CommandException("sha256 inválido")
+        val size = a["size"] as? Long
+        if (size == null || size < 1 || size > MAX_APK_BYTES) throw CommandException("tamanho inválido")
+        return InstallArgs(pkg, sha, size)
+    }
 
     fun bool(b: Any?): Boolean = b as? Boolean ?: throw CommandException("valor lógico inválido")
 
@@ -173,6 +196,11 @@ object Commands {
         if (author.window?.contains(nowMs) == false) throw CommandException("fora da janela de horário deste guardião")
         if (cmd.type in GUARDIAN_TYPES) return
         if (cmd.type == T_ADD_CREDENTIAL && cmd.args["id"] == cmd.guardian) return // qualquer guardião inclui passkey para si mesmo
+        if (cmd.type in MASTER_TYPES) {
+            if (author.role != ROLE_MASTER) throw CommandException("só o guardião-mestre pode mandar este comando")
+            if (cmd.type == T_INSTALL_APP) checkInstallArgs(cmd.args)
+            return
+        }
         if (author.role !in ADMINISH) throw CommandException("o guardião não pode mandar este comando")
         if (cmd.type in TRUST_TYPES && author.role != ROLE_MASTER) {
             val target = trust.guardians[cmd.args["id"]]?.role

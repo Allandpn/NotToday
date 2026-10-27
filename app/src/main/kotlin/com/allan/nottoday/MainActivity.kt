@@ -29,6 +29,7 @@ import com.allan.nottoday.remote.Pairing
 import com.allan.nottoday.remote.RemoteChannel
 import com.allan.nottoday.remote.RemoteStore
 import com.allan.nottoday.remote.GatewayApi
+import com.allan.nottoday.remote.GatewayException
 import com.allan.nottoday.remote.DeviceKey
 import com.allan.nottoday.remote.DevAuth
 
@@ -59,7 +60,6 @@ class MainActivity : Activity() {
     private lateinit var requestBarView: LinearLayout
     private val requestLabel by lazy { TextView(this) }
     private val pickedApps = linkedSetOf<String>()
-    private var showAds = false
     private val picked = linkedSetOf<String>()
     private val depth = HashMap<String, Int>()  // domínio bloqueado -> quantos rótulos foram tirados antes de pedir
     private var page: String? = null                 // subtela das configurações (null = início)
@@ -389,12 +389,11 @@ class MainActivity : Activity() {
         val api = unblockApi()?.first ?: return
         if (blockedLoading) return
         blockedLoading = true
-        val onlyOwn = !showAds
         runAsync(onDone = { blockedLoading = false }) {
             var data: BlockedData? = null
             var err: String? = null
             try {
-                val items = api.blocked(onlyOwn)
+                val items = api.blocked()
                 val reqs = api.requests()
                 val refused = try { api.refusedApps() } catch (_: Exception) { emptySet() }
                 data = BlockedData(items, reqs, refused)
@@ -524,13 +523,22 @@ class MainActivity : Activity() {
                 minimumHeight = dp(64)
                 setPadding(dp(16), dp(8), dp(8), dp(8))
                 touchable()
-                setOnClickListener { cb.toggle(); if (cb.isChecked) picked.add(b.domain) else picked.remove(b.domain); refreshBar() }
+                // Bloqueio de lista é só para ver: o gateway recusa o pedido e quem libera é o guardião, à mão.
+                if (b.own) setOnClickListener { cb.toggle(); if (cb.isChecked) picked.add(b.domain) else picked.remove(b.domain); refreshBar() }
                 addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                if (levels.size > 1) {
+                if (b.own && levels.size > 1) {
                     addView(less)
                     addView(more)
                 }
-                addView(cb)
+                if (b.own) addView(cb) else addView(
+                    TextView(this@MainActivity).apply {
+                        text = if (b.veto) "vetado" else "bloqueado por lista"
+                        textSize = 12f
+                        alpha = 0.6f
+                        setTextColor(getColor(R.color.nt_text))
+                        setPadding(dp(8), 0, dp(8), 0)
+                    },
+                )
             },
         )
     }
@@ -544,15 +552,16 @@ class MainActivity : Activity() {
         picked.retainAll(fresh.map { it.domain }.toSet())
 
         section("O que aparece aqui")
-        text("Marque o que você tentou abrir e peça a liberação. O guardião decide pelo site.")
-        switchRow("Mostrar também anúncios e rastreadores", showAds, "Inclui o que as listas de anúncios bloquearam.").apply {
-            setOnCheckedChangeListener { _, on -> showAds = on; blockedData = null; render(); loadBlocked() }
-        }
+        text("Itens sem caixa de marcar não podem ser pedidos por aqui. Se achar que é um erro, fale com o guardião.")
         if (fresh.isEmpty()) {
             section("Bloqueado")
             text("Nada bloqueado nas últimas 24 horas. Tente abrir o site de novo e volte aqui.")
         } else {
-            fun source(b: BlockedItem) = if (b.own) "regra própria" else b.list.ifEmpty { "lista" }.substringAfter("://").substringBefore('/')
+            fun source(b: BlockedItem) = when {
+                b.own -> "regra própria"
+                b.veto -> "vetado pelo guardião-mor (${b.list})"
+                else -> "lista " + b.list.ifEmpty { "do Pi-hole" }.let { if ("://" in it) it.substringAfter("://").substringBefore('/') else it }
+            }
             fun summary(b: BlockedItem) = "${b.count} vez${if (b.count > 1) "es" else ""} · ${UnblockText.ago(now, b.last)} · ${source(b)}"
             val recent = fresh.filter { now - it.last <= 900 }
             val older = fresh.filter { now - it.last > 900 }.take(60)
@@ -567,7 +576,7 @@ class MainActivity : Activity() {
             section("Lista")
             button("Selecionar os mais recentes", summary = "Até $MAX_ASK de uma vez") {
                 picked.clear()
-                picked.addAll(fresh.take(MAX_ASK).map { it.domain })
+                picked.addAll(fresh.filter { it.own }.take(MAX_ASK).map { it.domain })
                 render()
             }
             button("Esconder desta lista", summary = "Só tira daqui o que já apareceu. O guardião continua vendo o registro dele.") {
@@ -685,6 +694,12 @@ class MainActivity : Activity() {
                 pickedApps.clear()
                 depth.clear()
                 "Pedido enviado. Mande o link ao guardião."
+            } catch (e: GatewayException) {
+                if (e.status == 403 && !sites) {
+                    "Não foi possível pedir: este app foi vetado pelo guardião-mor e não pode ser pedido."
+                } else {
+                    "Não foi possível pedir: ${e.message ?: e.javaClass.simpleName}"
+                }
             } catch (e: Exception) {
                 "Não foi possível pedir: ${e.message ?: e.javaClass.simpleName}"
             }

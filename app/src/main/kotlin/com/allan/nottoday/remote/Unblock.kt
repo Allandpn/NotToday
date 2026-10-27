@@ -6,14 +6,15 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 
-data class BlockedItem(val domain: String, val own: Boolean, val list: String, val cname: Boolean, val count: Long, val last: Long)
+data class BlockedItem(val domain: String, val own: Boolean, val list: String, val cname: Boolean, val count: Long, val last: Long, val veto: Boolean = false)
 data class RequestItem(val domain: String, val state: String, val ttlS: Long?)
 data class UnblockRequest(val id: Long, val status: String, val items: List<RequestItem>)
 data class AppAsk(val pkg: String, val label: String)
 
 /** Pedidos de liberação ao guardião: o que o Pi-hole bloqueou, o pedido e a resposta. Nada de texto livre. */
 class UnblockApi(private val api: GatewayApi, private val dev: String) {
-    fun blocked(onlyOwn: Boolean): List<BlockedItem> {
+    /** Tudo que foi bloqueado, com o motivo: regra própria (dá para pedir), lista ou vetado pelo guardião-mor (só para ver). */
+    fun blocked(onlyOwn: Boolean = false): List<BlockedItem> {
         val r = api.call("GET", "/v1/devices/$dev/blocked" + if (onlyOwn) "?src=own" else "")
         return (r["items"] as? List<*>).orEmpty().mapNotNull { m ->
             val x = m as? Map<*, *> ?: return@mapNotNull null
@@ -24,6 +25,7 @@ class UnblockApi(private val api: GatewayApi, private val dev: String) {
                 cname = x["cname"] == true,
                 count = x["count"] as? Long ?: 1L,
                 last = x["last"] as? Long ?: 0L,
+                veto = x["src"] == "veto",
             )
         }
     }
