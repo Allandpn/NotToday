@@ -313,8 +313,9 @@ class RemoteCommandsTest {
         val rep = RemoteReport.build(ctx, consumer, listOf(mapOf("type" to "x", "ok" to true, "msg" to "m")))
         val parsed = Json.parseObject(Json.encode(rep))
         for (k in listOf("kind", "ts", "version", "owner", "filterActive", "filterReason", "tailscale", "pinSet", "pendingApps",
-            "pending", "windows", "snapshot", "trust", "ctrs", "executed")) assertTrue("falta $k", k in parsed)
+            "pending", "windows", "snapshot", "trust", "ctrs", "executed", "tsIps")) assertTrue("falta $k", k in parsed)
         assertEquals("device", parsed["kind"])
+        assertTrue("tsIps é uma lista (vazia sem Tailscale)", parsed["tsIps"] is List<*>)   // sem ele o executor não acha os bloqueios do aparelho
         @Suppress("UNCHECKED_CAST")
         assertEquals("MAINTENANCE", (parsed["pending"] as List<Map<String, Any?>>)[0]["kind"])
         @Suppress("UNCHECKED_CAST")

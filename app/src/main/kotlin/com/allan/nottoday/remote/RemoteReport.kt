@@ -65,6 +65,9 @@ object RemoteReport {
             "filterActive" to policy.filterActive(),
             "filterReason" to Health.lastDetail,
             "tailscale" to (Catalog.TAILSCALE_PKG in PackageGuard.installedSet(context)),
+            // IPs deste aparelho na Tailscale: é por eles que o executor reconhece as consultas do Pi-hole como deste aparelho.
+            // Sem eles, a lista de bloqueados do aparelho fica vazia (o TailnetIps existia, mas o relatório não o usava).
+            "tsIps" to TailnetIps.local(),
             "pinSet" to PinStore(context).isSet,
             "pendingApps" to pendingApps,
             "pending" to pending,
