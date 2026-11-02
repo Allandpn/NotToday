@@ -50,5 +50,10 @@ jobs:
           VERSAO="${GITHUB_REF_NAME#v}"
           cp app/build/outputs/apk/release/app-release.apk "nottoday-${VERSAO}.apk"
           sha256sum "nottoday-${VERSAO}.apk"
-          gh release create "$GITHUB_REF_NAME" "nottoday-${VERSAO}.apk" \
-            --title "NotToday ${VERSAO}" --notes "NotToday ${VERSAO}: APK de release assinado."
+          # A Release pode já existir (criada pela página do GitHub junto com a etiqueta): aí só anexa o APK, trocando um anterior.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "nottoday-${VERSAO}.apk" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "nottoday-${VERSAO}.apk" \
+              --title "NotToday ${VERSAO}" --notes "NotToday ${VERSAO}: APK de release assinado."
+          fi
