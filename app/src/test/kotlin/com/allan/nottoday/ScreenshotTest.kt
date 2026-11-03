@@ -142,7 +142,7 @@ class ScreenshotTest {
         shot(a, "06-restricoes")
         views(a.window.decorView).first { it.contentDescription == "Voltar" }.performClick()
         button(a, "Filtro DNS").performClick()
-        views(a.window.decorView).filterIsInstance<android.widget.Switch>().first().performClick() // muda o rascunho
+        views(a.window.decorView).first { it.tag == "mainswitch" }.performClick() // muda o rascunho
         shot(a, "07-filtro-com-alteracao")
         a.finish()
 
