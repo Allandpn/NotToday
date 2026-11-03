@@ -93,7 +93,7 @@ class ScreenshotTest {
         // 1) primeira abertura: definir PIN (com o botão de parear)
         var a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         shot(a, "01-definir-pin")
-        button(a, "Parear com Guardian remoto").performClick()
+        button(a, "Prefiro parear com o guardião").performClick()
         shot(a, "02-parear")
         a.finish()
 
@@ -139,5 +139,23 @@ class ScreenshotTest {
         shot(a, "09-liberacoes-pedidos")
         a.debugShowBlocked(items, emptyList(), "apps")
         shot(a, "10-liberacoes-apps")
+        a.finish()
+
+        // 5) início com o Device Owner ativo: o cartão "Protegido"
+        shadowOf(ctx.getSystemService(android.app.admin.DevicePolicyManager::class.java))
+            .setDeviceOwner(android.content.ComponentName(ctx, AdminReceiver::class.java))
+        a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        a.findViewById<EditText>(views(a.window.decorView).filterIsInstance<android.widget.TextView>().first { it.text.toString() == "PIN" && it.labelFor != View.NO_ID }.labelFor).setText("246810")
+        button(a, "Entrar").performClick()
+        shot(a, "05b-inicio-filtro-nao-confirmado")
+        a.finish()
+        Config(ctx).dnsFilterEnabled = false   // sem filtro a confirmar (e sem o erro do keystore, que só existe no Robolectric)
+        Diag.lastError = null
+        a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        a.findViewById<EditText>(views(a.window.decorView).filterIsInstance<android.widget.TextView>().first { it.text.toString() == "PIN" && it.labelFor != View.NO_ID }.labelFor).setText("246810")
+        button(a, "Entrar").performClick()
+        Diag.lastError = null
+        a.debugRender()
+        shot(a, "05c-inicio-protegido")
     }
 }

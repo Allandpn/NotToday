@@ -243,14 +243,31 @@ class MainActivity : Activity() {
 
     private fun renderSetPin() {
         title(if (changingPin) "Trocar PIN" else "Definir PIN")
-        text("A pessoa de confiança deve digitar o PIN agora e guardá-lo. Mínimo ${PinStore.MIN_LENGTH} dígitos.")
-        val pin = pinField("Novo PIN")
-        val again = pinField("Repita o PIN")
+        lead("A pessoa de confiança digita o PIN agora e o guarda.")
+        val pin = pinField("Novo PIN", loose = true, helper = "Mínimo de ${PinStore.MIN_LENGTH} dígitos")
+        val again = pinField("Repita o PIN", loose = true)
         var delayField: EditText? = null
         if (!changingPin) {
-            text("Atraso para qualquer desbloqueio, em horas (0 = sem atraso, só para testes). Padrão: 24.")
-            delayField = field("Atraso (horas)") {
-                setText((Config.DEFAULT_DELAY_MIN / 60).toString())
+            // O atraso quase nunca muda na primeira vez: fica recolhido em "Avançado".
+            section(null)
+            val more = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+            val hours = Config.DEFAULT_DELAY_MIN / 60
+            val toggle = navRow("Avançado", "Atraso para desbloqueios: $hours h", R.drawable.ic_tune, R.drawable.ic_expand_more) {}
+            toggle.setOnClickListener {
+                val open = more.visibility != View.VISIBLE
+                more.visibility = if (open) View.VISIBLE else View.GONE
+                (toggle.getChildAt(toggle.childCount - 1) as android.widget.ImageView)
+                    .setImageResource(if (open) R.drawable.ic_expand_less else R.drawable.ic_expand_more)
+            }
+            content.addView(more.apply { tag = SettingsPage.ROW; setPadding(dp(16), 0, dp(16), dp(12)) })
+            more.addView(TextView(this).apply {
+                text = "Espera para qualquer desbloqueio, em horas (0 = sem atraso, só para testes)."
+                textSize = 14f
+                setTextColor(getColor(R.color.nt_muted))
+                setPadding(0, 0, 0, dp(4))
+            })
+            delayField = field("Atraso (horas)", parent = more) {
+                setText(hours.toString())
                 inputType = InputType.TYPE_CLASS_NUMBER
             }
         }
@@ -268,17 +285,12 @@ class MainActivity : Activity() {
                 }
             }
         }
-        if (changingPin) button("Cancelar") {
+        if (changingPin) actionButton("Cancelar", style = Style.TEXT) {
             changingPin = false
             render()
-        }
-        if (!changingPin) {
-            section("Guardian remoto")
-            text("Se a pessoa de confiança está em outro lugar, pareie com ela em vez de definir o PIN aqui: ela define o PIN pelo site.")
-            button("Parear com Guardian remoto") {
-                pairing = true
-                render()
-            }
+        } else actionButton("Prefiro parear com o guardião", R.drawable.ic_link, Style.TEXT) {
+            pairing = true
+            render()
         }
     }
 
@@ -361,11 +373,16 @@ class MainActivity : Activity() {
     }
 
     /** Entrada na tela de bloqueio: leva à lista do que foi bloqueado. Pedido ao guardião não usa PIN e não concede nada. */
+    /** Na tela de bloqueio: a ação de quem usa o aparelho, secundária ao "Entrar" (que é da pessoa de confiança). */
     private fun renderRequestToGuardian() {
         if (!remote.isPaired) return
-        section("Pedir ao guardião")
-        button("Pedir liberação de sites e apps", primary = true) { openLiberacoes() }
-        text("Mostra o que o filtro bloqueou e os apps suspensos, e manda o pedido ao guardião.")
+        content.addLoose(TextView(this).apply {
+            text = "Precisa de um site ou app?"
+            textSize = 14f
+            gravity = android.view.Gravity.CENTER
+            setTextColor(getColor(R.color.nt_muted))
+        }, matchWrap.apply { topMargin = dp(48) })
+        actionButton("Pedir liberação ao guardião", R.drawable.ic_send, Style.TONAL) { openLiberacoes() }
     }
 
     // --- Liberações ------------------------------------------------------------------------------------
@@ -398,6 +415,9 @@ class MainActivity : Activity() {
         render()
         loadBlocked()
     }
+
+    /** Só para os testes de captura de tela: redesenha a tela atual. */
+    internal fun debugRender() = render()
 
     /** Só para os testes de captura de tela: mostra a tela de liberações com dados prontos, sem rede. */
     internal fun debugShowBlocked(items: List<BlockedItem>, requests: List<UnblockRequest>, tab: String, marked: Set<String> = emptySet()) {
@@ -867,22 +887,58 @@ class MainActivity : Activity() {
         } else text("Com o Device Owner ativo, o pareamento só sai com a remoção do Device Owner (pedido com atraso).")
     }
 
+    private var unlockError: String? = null
+
     private fun renderUnlock(owner: Boolean) {
-        title("Bloqueado")
         val locked = pins.lockedForMs()
+        lockHeader(if (locked > 0) "Muitas tentativas. Tente de novo em ${(locked / 60_000) + 1} min." else "Digite o PIN da pessoa de confiança")
         if (locked > 0) {
-            text("Muitas tentativas. Tente de novo em ${(locked / 60_000) + 1} min.")
-            button("Atualizar") { render() }
+            actionButton("Tentar de novo", R.drawable.ic_refresh, Style.TONAL) { render() }
         } else {
-            val pin = pinField("PIN")
-            button("Entrar", primary = true) {
-                if (pins.verify(pin.text.toString())) unlocked = true else toast("PIN incorreto")
-                render()
+            val pin = pinField("PIN", loose = true, helper = unlockError, error = unlockError != null).apply {
+                gravity = android.view.Gravity.CENTER
+                textSize = 22f
+                letterSpacing = 0.3f
+                setOnEditorActionListener { _, _, _ -> performUnlock(this); true }
             }
+            button("Entrar", primary = true) { performUnlock(pin) }
         }
         if (owner) renderDevWindowLogin()
         renderRequestToGuardian()
     }
+
+    private fun performUnlock(pin: EditText) {
+        if (pins.verify(pin.text.toString())) {
+            unlocked = true
+            unlockError = null
+        } else unlockError = "PIN incorreto"
+        render()
+    }
+
+    /** Cadeado no centro, nome do app e a instrução: o padrão de tela de desbloqueio. */
+    private fun lockHeader(message: String) = content.addLoose(
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER_HORIZONTAL
+            setPadding(0, dp(56), 0, dp(16))
+            addView(circleIcon(R.drawable.ic_lock, R.drawable.circle_neutral, R.color.nt_green, 72, 36))
+            addView(TextView(this@MainActivity).apply {
+                text = "NotToday"
+                textSize = 26f
+                gravity = android.view.Gravity.CENTER
+                setTextColor(getColor(R.color.nt_text))
+                setPadding(0, dp(20), 0, 0)
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = message
+                textSize = 15f
+                gravity = android.view.Gravity.CENTER
+                setTextColor(getColor(R.color.nt_muted))
+                setPadding(dp(16), dp(6), dp(16), 0)
+            })
+        },
+        matchWrap,
+    )
 
     /** Contagem regressiva da janela de desenvolvimento: atualiza a cada 250 ms e volta ao formulário quando acaba. */
     private fun startCountdown() {
@@ -959,9 +1015,16 @@ class MainActivity : Activity() {
     // subtela por categoria. As mudanças de todas as subtelas vão para um rascunho só; "Salvar e aplicar" manda o
     // rascunho pelo Gate (endurecer vale na hora, afrouxar espera o atraso), como antes.
     private val pages = listOf(
-        "restricoes" to "Restrições", "lojas" to "Lojas", "filtro" to "Filtro DNS", "apps" to "Apps novos (Play Store)",
-        "dev" to "Desenvolvimento (ADB curto)", "chrome" to "Chrome", "sistema" to "Sistema", "seguranca" to "Segurança e PIN",
+        "restricoes" to "Restrições", "lojas" to "Lojas", "filtro" to "Filtro DNS", "apps" to "Apps novos",
+        "dev" to "Desenvolvimento", "chrome" to "Chrome", "sistema" to "Sistema", "seguranca" to "Segurança e PIN",
         "guardian" to "Guardian remoto", "perigo" to "Zona de perigo",
+    )
+
+    /** Ícone de cada categoria, como nas Configurações do Android (Material Icons). */
+    private val pageIcons = mapOf(
+        "restricoes" to R.drawable.ic_shield, "lojas" to R.drawable.ic_store, "filtro" to R.drawable.ic_dns, "apps" to R.drawable.ic_apps,
+        "dev" to R.drawable.ic_code, "chrome" to R.drawable.ic_language, "sistema" to R.drawable.ic_system_update,
+        "seguranca" to R.drawable.ic_lock, "guardian" to R.drawable.ic_link, "perigo" to R.drawable.ic_dangerous,
     )
 
     private fun draft(): MutableMap<String, String> = draft ?: LinkedHashMap(config.snapshot()).also { draft = it }
@@ -979,18 +1042,17 @@ class MainActivity : Activity() {
 
     private fun renderHome(owner: Boolean) {
         title("NotToday")
-        cardText(
-            if (owner) "Device Owner ativo\nO NotToday controla as restrições deste aparelho."
-            else "Device Owner inativo\nRode no PC: adb shell dpm set-device-owner $packageName/.AdminReceiver",
-            accent = owner,
-        )
         renderStatus(owner)
         renderMaintenance(owner)
         renderPending(owner)
+        if (remote.isPaired) {
+            section(null)
+            navRow("Liberações", "Sites e apps bloqueados, pedidos", R.drawable.ic_public) { openLiberacoes() }
+        }
         section("Configurações")
         for ((key, label) in pages) {
             if (key == "perigo" && !owner) continue
-            button(label, summary = summaryOf(key)) {
+            navRow(label, summaryOf(key), pageIcons.getValue(key), danger = key == "perigo") {
                 page = key
                 render()
             }
@@ -1000,16 +1062,22 @@ class MainActivity : Activity() {
     private fun summaryOf(key: String): String {
         val d = draft()
         fun on(k: String) = d[k] == "true"
-        fun yesNo(k: String) = if (on(k)) "ligado" else "desligado"
         return when (key) {
             "restricoes" -> "${Catalog.restrictions.count { on("r_${it.key}") }} de ${Catalog.restrictions.size} ligadas"
-            "lojas" -> "Suspender lojas alternativas: ${yesNo("suspend_blocked")}"
-            "filtro" -> if (on("dns_filter")) "Pelo Tailscale · ligado · canário ${d["canary"].orEmpty().ifEmpty { "não definido" }}" else "Desligado"
-            "apps" -> "Suspender até aprovar: ${yesNo("new_apps_deny")} · ${PackageGuard.pending(this).size} aguardando"
-            "dev" -> "${d["dev_windows_per_day"]} janela(s) por dia de ${d["dev_window_seconds"]} s" +
-                if (devPins.isSet) "" else " · PIN não definido"
-            "chrome" -> "DoH desligado: ${if (on("chrome_doh_off")) "sim" else "não"} · SafeSearch: ${if (on("chrome_safesearch")) "sim" else "não"} · IP bloqueado: ${if (on("chrome_block_ip")) "sim" else "não"}"
-            "sistema" -> "Adiar atualizações: ${yesNo("postpone_updates")}"
+            "lojas" -> if (on("suspend_blocked")) "Lojas alternativas suspensas" else "Desligado"
+            "filtro" -> if (on("dns_filter")) "Ligado · canário ${d["canary"].orEmpty().ifEmpty { "não definido" }}" else "Desligado"
+            "apps" -> if (on("new_apps_deny")) {
+                val n = PackageGuard.pending(this).size
+                "Suspensos até aprovar" + if (n > 0) " · $n aguardando" else ""
+            } else "Desligado"
+            "dev" -> {
+                val n = d["dev_windows_per_day"]?.toIntOrNull() ?: 0
+                "$n ${if (n == 1) "janela" else "janelas"} por dia de ${d["dev_window_seconds"]} s" + if (devPins.isSet) "" else " · sem PIN"
+            }
+            "chrome" -> listOfNotNull(
+                "SafeSearch".takeIf { on("chrome_safesearch") }, "DoH desligado".takeIf { on("chrome_doh_off") }, "IP bloqueado".takeIf { on("chrome_block_ip") },
+            ).joinToString(" · ").ifEmpty { "Nada ativo" }
+            "sistema" -> if (on("postpone_updates")) "Atualizações adiadas" else "Atualiza normalmente"
             "seguranca" -> "Atraso para afrouxar: ${(d[Gate.KEY_DELAY]?.toLongOrNull() ?: 0) / 60} h"
             "guardian" -> if (remote.isPaired) "Pareado" + if (remote.activated) " e ativado" else ", aguardando ativação" else "Não pareado"
             else -> "Remover o Device Owner"
@@ -1241,22 +1309,93 @@ class MainActivity : Activity() {
     }
 
     /** Estado do filtro: VPN, canário e erro recente. */
+    /**
+     * O cartão do topo do início responde "estou protegido?": verde quando o Device Owner está ativo e o filtro (se ligado)
+     * está confirmado; âmbar, com o motivo e o que fazer, quando não.
+     */
     private fun renderStatus(owner: Boolean) {
-        if (!owner) return
-        val vpn = VpnWatch.isVpnUp(this)
+        if (!owner) {
+            statusCard(false, R.drawable.ic_warning, "Device Owner inativo", "Sem ele as restrições não valem.", "Como ativar") { showOwnerHowTo() }
+            return
+        }
         val active = policy.filterActive()
-        cardText(
-            "Filtro: ${if (!config.dnsFilterEnabled) "desligado" else if (active) "CONFIRMADO" else "NÃO confirmado"}\n" +
-                "VPN: ${if (vpn) "de pé" else "fora"} · ${Health.lastDetail}" +
-                (Diag.lastError?.let { "\nErro: $it" } ?: ""),
-            accent = active,
-        )
-        button("Atualizar estado") {
+        val ligadas = Catalog.restrictions.count { config.isRestrictionOn(it) }
+        val refresh = {
             runAsync {
                 policy.heartbeat()
                 runOnUiThread { render() }
             }
         }
+        val err = Diag.lastError?.let { " · Erro: $it" } ?: ""
+        if (!config.dnsFilterEnabled || active) {
+            val filtro = if (config.dnsFilterEnabled) "Filtro confirmado" else "Filtro desligado"
+            val par = if (remote.isPaired) " · pareado" else ""
+            statusCard(true, R.drawable.ic_verified_user, "Protegido", "$filtro · $ligadas restrições$par$err", refresh = refresh)
+        } else {
+            val vpn = if (VpnWatch.isVpnUp(this)) "VPN de pé" else "VPN fora"
+            statusCard(false, R.drawable.ic_gpp_maybe, "Filtro não confirmado", "$vpn · ${Health.lastDetail}$err", refresh = refresh)
+        }
+    }
+
+    private fun showOwnerHowTo() {
+        val cmd = "adb shell dpm set-device-owner $packageName/.AdminReceiver"
+        AlertDialog.Builder(this)
+            .setTitle("Ativar o Device Owner")
+            .setMessage("Com o aparelho ligado ao PC por USB e a depuração ativa, rode no PC:\n\n$cmd\n\nAntes, remova as contas do aparelho (o Android exige).")
+            .setNegativeButton("Fechar", null)
+            .setPositiveButton("Copiar comando") { _, _ ->
+                getSystemService(android.content.ClipboardManager::class.java)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("comando", cmd))
+                toast("Comando copiado")
+            }
+            .show()
+    }
+
+    /** Cartão de estado no padrão do Material 3: ícone num círculo, título, resumo e, se houver, ação e atualizar. */
+    private fun statusCard(ok: Boolean, iconRes: Int, titleText: String, summary: String, action: String? = null,
+                           refresh: (() -> Unit)? = null, onAction: () -> Unit = {}) {
+        val on = if (ok) R.color.nt_on_ok else R.color.nt_on_warn
+        content.addLoose(
+            LinearLayout(this).apply {
+                tag = "statuscard"
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setBackgroundResource(if (ok) R.drawable.status_ok else R.drawable.status_warn)
+                setPadding(dp(20), dp(18), dp(8), dp(18))
+                addView(circleIcon(iconRes, if (ok) R.drawable.circle_ok else R.drawable.circle_warn, on, 48, 28))
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(TextView(this@MainActivity).apply {
+                        text = titleText
+                        textSize = 18f
+                        setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL))
+                        setTextColor(getColor(R.color.nt_text))
+                    })
+                    addView(TextView(this@MainActivity).apply {
+                        text = summary
+                        textSize = 14f
+                        setLineSpacing(0f, 1.1f)
+                        setTextColor(getColor(if (ok) R.color.nt_muted else R.color.nt_on_warn))
+                        setPadding(0, dp(2), 0, 0)
+                    })
+                    if (action != null) addView(TextView(this@MainActivity).apply {
+                        text = action
+                        textSize = 15f
+                        setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL))
+                        setTextColor(getColor(if (ok) R.color.nt_green else R.color.nt_orange))
+                        gravity = android.view.Gravity.CENTER_VERTICAL
+                        minHeight = dp(48)
+                        minimumHeight = dp(48)
+                        minWidth = dp(64)
+                        minimumWidth = dp(64)
+                        touchable()
+                        setOnClickListener { onAction() }
+                    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2) })
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(16); marginEnd = dp(8) })
+                if (refresh != null) addView(iconButton(R.drawable.ic_refresh, "Atualizar estado") { refresh() })
+            },
+            matchWrap.apply { topMargin = dp(4); bottomMargin = dp(4) },
+        )
     }
 
     /** Escolha dos apps que passam pelo filtro. Navegadores vêm marcados; desmarcar um navegador o isenta. */
@@ -1609,21 +1748,116 @@ class MainActivity : Activity() {
         )
     }
 
-    private fun pinField(label: String, parent: ViewGroup = content) =
-        field(label, parent = parent) { inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD }
+    /** Item de navegação: ícone à esquerda, título e resumo, e a seta (ou outro indicador) à direita. */
+    private fun navRow(label: String, summary: String?, iconRes: Int, trailing: Int = R.drawable.ic_chevron_right,
+                       danger: Boolean = false, onClick: () -> Unit): LinearLayout {
+        val row = LinearLayout(this).apply {
+            tag = SettingsPage.ROW
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            minimumHeight = dp(64)
+            setPadding(dp(16), dp(12), dp(12), dp(12))
+            touchable()
+            setOnClickListener { onClick() }
+            addView(icon(iconRes, if (danger) R.color.nt_red else R.color.nt_muted), LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(16) })
+            addView(twoLine(label, summary, if (danger) R.color.nt_red else R.color.nt_text), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(icon(trailing, R.color.nt_muted), LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginStart = dp(8) })
+        }
+        content.addView(row)
+        return row
+    }
+
+    private fun icon(res: Int, color: Int) = android.widget.ImageView(this).apply {
+        setImageResource(res)
+        imageTintList = android.content.res.ColorStateList.valueOf(getColor(color))
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+
+    private fun circleIcon(res: Int, bg: Int, color: Int, size: Int, iconSize: Int) = android.widget.FrameLayout(this).apply {
+        setBackgroundResource(bg)
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        layoutParams = LinearLayout.LayoutParams(dp(size), dp(size))
+        addView(icon(res, color), android.widget.FrameLayout.LayoutParams(dp(iconSize), dp(iconSize), android.view.Gravity.CENTER))
+    }
+
+    private enum class Style { TONAL, TEXT, TEXT_DANGER }
+
+    /**
+     * Botão que não é a ação principal: "tonal" (preenchido num tom acima do fundo, largura toda) ou de texto (centralizado,
+     * sem fundo), com ícone opcional antes do rótulo.
+     */
+    private fun actionButton(label: String, iconRes: Int? = null, style: Style = Style.TONAL, onClick: () -> Unit) {
+        val color = when (style) {
+            Style.TONAL -> R.color.nt_text
+            Style.TEXT -> R.color.nt_green
+            Style.TEXT_DANGER -> R.color.nt_red
+        }
+        val b = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+            minimumHeight = dp(if (style == Style.TONAL) 52 else 48)
+            setPadding(dp(20), 0, dp(20), 0)
+            if (style == Style.TONAL) {
+                setBackgroundResource(R.drawable.btn_tonal)
+                isClickable = true
+                isFocusable = true
+            } else touchable()
+            setOnClickListener { onClick() }
+            accessibilityDelegate = object : View.AccessibilityDelegate() {
+                override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
+                    super.onInitializeAccessibilityNodeInfo(host, info)
+                    info.className = Button::class.java.name
+                }
+            }
+            if (iconRes != null) addView(icon(iconRes, color), LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginEnd = dp(8) })
+            addView(TextView(this@MainActivity).apply {
+                text = label
+                textSize = 15f
+                setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL))
+                setTextColor(getColor(color))
+            })
+        }
+        val lp = if (style == Style.TONAL) matchWrap.apply { topMargin = dp(12) }
+        else LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            gravity = android.view.Gravity.CENTER_HORIZONTAL
+            topMargin = dp(4)
+        }
+        content.addLoose(b, lp)
+    }
+
+    /** Frase de abertura sob o título, fora dos grupos. */
+    private fun lead(s: String) = content.addLoose(
+        TextView(this).apply {
+            text = s
+            textSize = 15f
+            setLineSpacing(0f, 1.15f)
+            setTextColor(getColor(R.color.nt_muted))
+            setPadding(dp(8), 0, dp(8), dp(4))
+        },
+        matchWrap,
+    )
+
+    private fun pinField(label: String, parent: ViewGroup = content, loose: Boolean = false, helper: String? = null, error: Boolean = false) =
+        field(label, parent = parent, loose = loose, helper = helper, error = error) {
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        }
 
     /**
      * Campo de texto com rótulo visível em cima, ligado a ele para o leitor de tela (o texto de exemplo some ao digitar e
      * não serve de rótulo), e com no mínimo 48dp de altura para o toque.
      */
-    private fun field(label: String, example: String? = null, parent: ViewGroup = content, setup: EditText.() -> Unit = {}): EditText {
+    private fun field(label: String, example: String? = null, parent: ViewGroup = content, loose: Boolean = false,
+                      helper: String? = null, error: Boolean = false, setup: EditText.() -> Unit = {}): EditText {
         val f = EditText(this).apply {
             id = View.generateViewId()
             hint = example
+            textSize = 16f
             setTextColor(getColor(R.color.nt_text))
             setHintTextColor(getColor(R.color.nt_muted))
+            setBackgroundResource(R.drawable.field_bg) // contornado, como o "outlined text field" do Material 3
+            setPadding(dp(16), dp(14), dp(16), dp(14))
             setup()
-            minimumHeight = dp(48) // o da View: o inputType de uma linha troca o minHeight do TextView por minLines
+            minimumHeight = dp(56) // o da View: o inputType de uma linha troca o minHeight do TextView por minLines
         }
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1632,11 +1866,19 @@ class MainActivity : Activity() {
                 textSize = 13f
                 setTextColor(getColor(R.color.nt_muted))
                 labelFor = f.id
-                setPadding(dp(4), dp(4), 0, 0)
+                setPadding(dp(4), dp(4), 0, dp(6))
             })
             addView(f, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            if (helper != null) addView(TextView(this@MainActivity).apply {
+                text = helper
+                textSize = 13f
+                setTextColor(getColor(if (error) R.color.nt_red else R.color.nt_muted))
+                if (error) accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+                setPadding(dp(4), dp(6), 0, 0)
+            })
         }
-        parent.addView(box, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        if (loose) content.addLoose(box, matchWrap.apply { topMargin = dp(16) })
+        else parent.addView(box, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         return f
     }
 

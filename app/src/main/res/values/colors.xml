@@ -13,4 +13,12 @@
     <color name="nt_orange">#F4A261</color>
     <color name="nt_red">#EE8A70</color>
     <color name="nt_ink">#12202A</color>
+
+    <!-- Contêineres de estado (Material 3): fundo tingido e texto/ícone claros do mesmo tom. -->
+    <color name="nt_ok_container">#1D3A3A</color>
+    <color name="nt_ok_circle">#2A5752</color>
+    <color name="nt_on_ok">#7FE0D3</color>
+    <color name="nt_warn_container">#3B3022</color>
+    <color name="nt_warn_circle">#5A4428</color>
+    <color name="nt_on_warn">#E6D3BC</color>
 </resources>

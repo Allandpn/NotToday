@@ -37,14 +37,21 @@ class AcessibilidadeTest {
         val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         val all = views(a.window.decorView)
         val fields = all.filterIsInstance<EditText>()
-        assertEquals(3, fields.size) // novo PIN, repetir e atraso
+        assertEquals(2, fields.size) // novo PIN e repetir; o atraso fica recolhido em "Avançado"
         for (f in fields) {
             val label = all.filterIsInstance<TextView>().firstOrNull { it !is EditText && it.labelFor == f.id }
             assertTrue("campo sem rótulo: ${f.hint}", label != null && label.text.isNotBlank())
-            assertTrue("campo com menos de 48dp: ${f.height} ${f.minHeight} ${f.minimumHeight}", f.height >= (48 * a.resources.displayMetrics.density).toInt() - 1)
+            assertTrue("campo com menos de 48dp: ${f.height}", f.height >= (48 * a.resources.displayMetrics.density).toInt() - 1)
         }
         val labels = all.filterIsInstance<TextView>().filter { it.labelFor != View.NO_ID }.map { it.text.toString() }
-        assertEquals(listOf("Novo PIN", "Repita o PIN", "Atraso (horas)"), labels)
+        assertEquals(listOf("Novo PIN", "Repita o PIN"), labels)
+        // "Avançado" abre o atraso, também com rótulo
+        var adv: View = all.filterIsInstance<TextView>().first { it.text.toString() == "Avançado" }
+        while (!adv.isClickable) adv = adv.parent as View
+        adv.performClick(); idle()
+        val after = views(a.window.decorView)
+        val delay = after.filterIsInstance<TextView>().first { it.text.toString() == "Atraso (horas)" }
+        assertEquals("24", a.findViewById<EditText>(delay.labelFor).text.toString())
     }
 
     @Test
