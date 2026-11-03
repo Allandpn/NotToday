@@ -55,6 +55,8 @@ class MainActivity : Activity() {
     private var countdownView: TextView? = null
     private var countdownRunner: Runnable? = null
     private var showBlocked = false
+    private lateinit var fabView: LinearLayout
+    private val cancelling = mutableSetOf<Long>()  // pedidos cancelados que ainda podem ser desfeitos
     private var blockedTab = "domains"  // Liberações: "domains" | "apps" | "requests"
     private var barMode: String? = null  // barra de pedido: "sites" | "apps" | null
     private lateinit var requestBarView: LinearLayout
@@ -94,6 +96,29 @@ class MainActivity : Activity() {
 
         content = SettingsPage(this).apply { setPadding(dp(16), dp(8), dp(16), dp(32)) }
         val scroll = ScrollView(this).apply { addView(content) }
+        // Botão flutuante das Liberações ("Outro pedido"): fica sobre a lista, some no modo de seleção.
+        fabView = LinearLayout(this).apply {
+            tag = "fab"
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setBackgroundResource(R.drawable.fab_bg)
+            elevation = dp(6).toFloat()
+            minimumHeight = dp(56)
+            setPadding(dp(16), 0, dp(20), 0)
+            isClickable = true
+            isFocusable = true
+            visibility = View.GONE
+            contentDescription = "Outro pedido: um app ou assunto que a lista não mostra"
+            addView(icon(R.drawable.ic_add, R.color.nt_text), LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(12) })
+            addView(TextView(this@MainActivity).apply {
+                text = "Outro pedido"
+                textSize = 15f
+                setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL))
+                setTextColor(getColor(R.color.nt_text))
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            })
+            setOnClickListener { manualDialog() }
+        }
         saveBarView = LinearLayout(this).apply {
             tag = "savebar"
             orientation = LinearLayout.HORIZONTAL
@@ -160,7 +185,11 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(getColor(R.color.nt_bg))
-            addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(android.widget.FrameLayout(this@MainActivity).apply {
+                addView(scroll)
+                addView(fabView, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    android.view.Gravity.BOTTOM or android.view.Gravity.END).apply { setMargins(dp(16), dp(16), dp(16), dp(16)) })
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
             addView(undoBarView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(requestBarView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(saveBarView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -465,39 +494,30 @@ class MainActivity : Activity() {
         content.addLoose(blockedHeader!!, matchWrap)
         val api = unblockApi()
         val d = blockedData
-        val open = d?.requests?.count { it.status == "open" } ?: 0
-        val tabs = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setBackgroundResource(R.drawable.group_bg)
-            setPadding(dp(4), dp(4), dp(4), dp(4))
-        }
-        for ((key, label) in listOf("domains" to "Sites", "apps" to "Apps", "requests" to if (open > 0) "Pedidos · $open" else "Pedidos")) {
-            val on = blockedTab == key
-            tabs.addView(
-                TextView(this).apply {
-                    text = label
-                    gravity = android.view.Gravity.CENTER
-                    textSize = 15f
-                    setTextColor(getColor(if (on) R.color.nt_ink else R.color.nt_text))
-                    touchable()
-                    if (on) setBackgroundResource(R.drawable.btn_primary) // depois do toque: a aba marcada fica cheia
-                    setOnClickListener { blockedTab = key; render() }
-                },
-                LinearLayout.LayoutParams(0, dp(44), 1f),
-            )
-        }
-        content.addLoose(tabs, matchWrap.apply { topMargin = dp(4) })
+        val open = d?.requests?.count { it.status == "open" && it.id !in cancelling } ?: 0
+        content.addLoose(tabs(open), matchWrap)
+        content.addLoose(View(this).apply { setBackgroundColor(getColor(R.color.nt_line)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
         if (api == null) {
-            section(null)
-            text("Sem pareamento com o guardião.")
+            emptyState(R.drawable.ic_link, "Sem pareamento", "Pareie com o guardião para pedir liberações.")
             return
         }
-        blockedError?.let { section(null); cardText("Não foi possível falar com o gateway\n$it") }
         if (d == null) {
-            section(null)
-            text(if (blockedError == null) "Carregando…" else "Toque em atualizar (canto de cima) para tentar de novo.")
+            if (blockedError != null) {
+                content.addLoose(View(this), LinearLayout.LayoutParams(1, dp(12)))
+                statusCard(false, R.drawable.ic_cloud_off, "Sem conexão com o guardião", blockedError!!, "Tentar de novo") {
+                    blockedError = null; render(); loadBlocked()
+                }
+            } else {
+                content.addLoose(android.widget.ProgressBar(this).apply {
+                    indeterminateTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.nt_green))
+                    contentDescription = "Carregando"
+                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    gravity = android.view.Gravity.CENTER_HORIZONTAL; topMargin = dp(96)
+                })
+            }
             return
         }
+        blockedError?.let { note("Não foi possível atualizar agora ($it). Mostrando a última lista.") }
         when (blockedTab) {
             "apps" -> drawApps(d)
             "requests" -> drawRequests(api.first, api.second, d)
@@ -505,95 +525,261 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Uma linha marcável: tocar em qualquer parte alterna; o resumo fica embaixo do título. */
-    private fun pickRow(title: String, summary: String?, checked: Boolean, titleColor: Int = R.color.nt_text, onToggle: (Boolean) -> Unit) {
-        val cb = android.widget.CheckBox(this).apply {
-            isChecked = checked
-            buttonTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.nt_green))
-            isClickable = false
-            isFocusable = false
-        }
-        content.addView(
-            LinearLayout(this).apply {
-                tag = SettingsPage.ROW
-                orientation = LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                minimumHeight = dp(64)
-                setPadding(dp(16), dp(12), dp(8), dp(12))
+    /** Abas do Material 3: texto, sublinhado verde na marcada e o contador de pedidos abertos num selo. */
+    private fun tabs(open: Int): LinearLayout = LinearLayout(this).apply {
+        tag = "tabs"
+        orientation = LinearLayout.HORIZONTAL
+        for ((key, label) in listOf("domains" to "Sites", "apps" to "Apps", "requests" to "Pedidos")) {
+            val on = blockedTab == key
+            addView(android.widget.FrameLayout(this@MainActivity).apply {
                 touchable()
-                setOnClickListener { cb.toggle(); onToggle(cb.isChecked); refreshBar() }
-                addView(twoLine(title, summary, titleColor), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                addView(cb)
-            },
-        )
+                isSelected = on
+                contentDescription = label + if (key == "requests" && open > 0) ", $open aberto${if (open > 1) "s" else ""}" else ""
+                accessibilityDelegate = object : View.AccessibilityDelegate() {
+                    override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
+                        super.onInitializeAccessibilityNodeInfo(host, info)
+                        info.className = "android.widget.TabWidget"
+                        info.isSelected = on
+                    }
+                }
+                setOnClickListener { blockedTab = key; render() }
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                    addView(TextView(this@MainActivity).apply {
+                        text = label
+                        textSize = 15f
+                        setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL))
+                        setTextColor(getColor(if (on) R.color.nt_green else R.color.nt_muted))
+                    })
+                    if (key == "requests" && open > 0) addView(badge(open.toString()), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(6) })
+                }, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                if (on) addView(View(this@MainActivity).apply { setBackgroundResource(R.drawable.tab_indicator) },
+                    android.widget.FrameLayout.LayoutParams(dp(56), dp(3), android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL))
+            }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        }
     }
 
-    /** Linha de um site bloqueado. « tira o rótulo da esquerda (até o domínio principal) e » devolve; o pedido vai com o domínio mostrado. */
+    private fun badge(t: String) = TextView(this).apply {
+        text = t
+        textSize = 12f
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = android.view.Gravity.CENTER
+        includeFontPadding = false
+        setTextColor(getColor(R.color.nt_ink))
+        setBackgroundResource(R.drawable.badge_bg)
+        minWidth = dp(20)
+        minHeight = dp(20)
+        setPadding(dp(6), dp(2), dp(6), dp(2))
+    }
+
+    private enum class Chip { OK, WAIT, NO, NEUTRAL }
+
+    /** Selo de estado: ícone, texto e cor juntos (a cor nunca é o único sinal). */
+    private fun chip(t: String, iconRes: Int?, kind: Chip) = LinearLayout(this).apply {
+        val (bg, fg) = when (kind) {
+            Chip.OK -> R.color.nt_chip_ok to R.color.nt_on_chip_ok
+            Chip.WAIT -> R.color.nt_chip_wait to R.color.nt_on_chip_wait
+            Chip.NO -> R.color.nt_chip_no to R.color.nt_on_chip_no
+            Chip.NEUTRAL -> R.color.nt_surface2 to R.color.nt_muted
+        }
+        tag = "chip"
+        orientation = LinearLayout.HORIZONTAL
+        gravity = android.view.Gravity.CENTER_VERTICAL
+        setBackgroundResource(R.drawable.chip_bg)
+        backgroundTintList = android.content.res.ColorStateList.valueOf(getColor(bg))
+        setPadding(dp(8), 0, dp(10), 0)
+        minimumHeight = dp(24)
+        if (iconRes != null) addView(icon(iconRes, fg), LinearLayout.LayoutParams(dp(14), dp(14)).apply { marginEnd = dp(4) })
+        addView(TextView(this@MainActivity).apply {
+            text = t
+            textSize = 12f
+            setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL))
+            setTextColor(getColor(fg))
+        })
+    }
+
+    /** Estado vazio: ícone num círculo, uma frase e o que esperar. */
+    private fun emptyState(iconRes: Int, titleText: String, body: String) = content.addLoose(
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER_HORIZONTAL
+            setPadding(dp(24), dp(72), dp(24), dp(24))
+            addView(circleIcon(iconRes, R.drawable.circle_neutral, R.color.nt_green, 80, 40))
+            addView(TextView(this@MainActivity).apply {
+                text = titleText
+                textSize = 18f
+                gravity = android.view.Gravity.CENTER
+                setTextColor(getColor(R.color.nt_text))
+                setPadding(0, dp(20), 0, 0)
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = body
+                textSize = 14f
+                gravity = android.view.Gravity.CENTER
+                setLineSpacing(0f, 1.15f)
+                setTextColor(getColor(R.color.nt_muted))
+                setPadding(0, dp(8), 0, 0)
+            })
+        },
+        matchWrap,
+    )
+
+    /**
+     * Linha marcável no padrão das listas do Android: a caixa à esquerda marca; o resto da linha faz a ação dela
+     * (`onOpen`) ou, se não houver, também marca. `trailing` vai à direita (um selo).
+     */
+    private fun checkRow(title: String, summary: String?, checked: Boolean?, trailing: View? = null, titleColor: Int = R.color.nt_text,
+                         onOpen: (() -> Unit)? = null, onToggle: (Boolean) -> Unit = {}): LinearLayout {
+        val row = LinearLayout(this).apply {
+            tag = SettingsPage.ROW
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            minimumHeight = dp(64)
+        }
+        var cb: android.widget.CheckBox? = null
+        if (checked != null) {
+            val box = android.widget.CheckBox(this).apply {
+                isChecked = checked
+                buttonTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.nt_green))
+                isClickable = false
+                isFocusable = false
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }
+            cb = box
+            row.addView(android.widget.FrameLayout(this).apply {
+                touchable()
+                contentDescription = "Marcar $title"
+                accessibilityDelegate = object : View.AccessibilityDelegate() {
+                    override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
+                        super.onInitializeAccessibilityNodeInfo(host, info)
+                        info.className = android.widget.CheckBox::class.java.name
+                        info.isCheckable = true
+                        info.isChecked = box.isChecked
+                    }
+                }
+                setOnClickListener { box.toggle(); onToggle(box.isChecked); refreshBar() }
+                addView(box, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.CENTER))
+            }, LinearLayout.LayoutParams(dp(56), ViewGroup.LayoutParams.MATCH_PARENT))
+        } else row.addView(View(this), LinearLayout.LayoutParams(dp(56), 1))
+        row.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            minimumHeight = dp(64)
+            setPadding(0, dp(10), dp(16), dp(10))
+            addView(twoLine(title, summary, titleColor), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            if (trailing != null) addView(trailing, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
+            when {
+                onOpen != null -> { touchable(); setOnClickListener { onOpen() } }
+                cb != null -> { touchable(); setOnClickListener { cb.toggle(); onToggle(cb.isChecked); refreshBar() } }
+            }
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        content.addView(row)
+        return row
+    }
+
+    /** Linha de um site bloqueado. O pedido vai com o domínio escolhido na folha de baixo (o completo ou um pai dele). */
     private fun siteRow(b: BlockedItem, baseSummary: String) {
         val levels = DomainEdit.levels(b.domain)
-        val info = twoLine(b.domain, baseSummary)
-        val titleTv = info.getChildAt(0) as TextView
-        val sumTv = info.getChildAt(1) as TextView
-        val cb = android.widget.CheckBox(this).apply {
-            isChecked = b.domain in picked
-            buttonTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.nt_green))
-            isClickable = false
-            isFocusable = false
+        val i = (depth[b.domain] ?: 0).coerceIn(0, levels.size - 1)
+        val summary = if (i > 0) "vale para *.${levels[i]}\n$baseSummary" else baseSummary
+        if (!b.own) {
+            // Bloqueio de lista é só para ver: o gateway recusa o pedido e quem libera é o guardião, à mão.
+            checkRow(b.domain, baseSummary, null, chip(if (b.veto) "vetado" else "lista", R.drawable.ic_block, Chip.NEUTRAL))
+            return
         }
-        fun small(label: String, desc: String) = Button(this).apply {
-            text = label
-            contentDescription = desc
-            isAllCaps = false
-            textSize = 18f
-            setTextColor(getColor(R.color.nt_text))
-            setBackgroundResource(R.drawable.btn_secondary)
-            minWidth = dp(44)
-            minimumWidth = dp(44)
-            minHeight = dp(48)
-            minimumHeight = dp(48)
-            setPadding(0, 0, 0, 0)
+        checkRow(levels[i], summary, b.domain in picked,
+            onOpen = if (levels.size > 1) ({ levelSheet(b, levels) }) else null) { on ->
+            if (on) picked.add(b.domain) else picked.remove(b.domain)
         }
-        val less = small("«", "Encurtar o domínio")
-        val more = small("»", "Voltar ao domínio completo")
-        fun refresh() {
-            val i = depth[b.domain] ?: 0
-            titleTv.text = levels[i]
-            sumTv.text = if (i > 0) "vale também para os subdomínios · era ${b.domain}\n$baseSummary" else baseSummary
-            less.isEnabled = i < levels.size - 1
-            more.isEnabled = i > 0
-            less.alpha = if (less.isEnabled) 1f else 0.3f
-            more.alpha = if (more.isEnabled) 1f else 0.3f
-        }
-        less.setOnClickListener { depth[b.domain] = (depth[b.domain] ?: 0) + 1; refresh() }
-        more.setOnClickListener { depth[b.domain] = (depth[b.domain] ?: 1) - 1; refresh() }
-        refresh()
-        content.addView(
-            LinearLayout(this).apply {
-                tag = SettingsPage.ROW
-                orientation = LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                minimumHeight = dp(64)
-                setPadding(dp(16), dp(8), dp(8), dp(8))
-                touchable()
-                // Bloqueio de lista é só para ver: o gateway recusa o pedido e quem libera é o guardião, à mão.
-                if (b.own) setOnClickListener { cb.toggle(); if (cb.isChecked) picked.add(b.domain) else picked.remove(b.domain); refreshBar() }
-                addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                if (b.own && levels.size > 1) {
-                    addView(less)
-                    addView(more)
-                }
-                if (b.own) addView(cb) else addView(
-                    TextView(this@MainActivity).apply {
-                        text = if (b.veto) "vetado" else "bloqueado por lista"
-                        textSize = 12f
-                        alpha = 0.6f
-                        setTextColor(getColor(R.color.nt_text))
-                        setPadding(dp(8), 0, dp(8), 0)
-                    },
-                )
-            },
-        )
     }
+
+    /** Folha de baixo para escolher o que pedir: o endereço exato ou um domínio pai (que vale para tudo dentro dele). */
+    private fun levelSheet(b: BlockedItem, levels: List<String>) {
+        val dlg = android.app.Dialog(this)
+        var chosen = (depth[b.domain] ?: 0).coerceIn(0, levels.size - 1)
+        val radios = mutableListOf<android.widget.RadioButton>()
+        val box = LinearLayout(this).apply {
+            tag = "sheet"
+            orientation = LinearLayout.VERTICAL
+            setBackgroundResource(R.drawable.sheet_bg)
+            setPadding(0, dp(8), 0, dp(24))
+            addView(View(this@MainActivity).apply { setBackgroundResource(R.drawable.sheet_handle) },
+                LinearLayout.LayoutParams(dp(32), dp(4)).apply { gravity = android.view.Gravity.CENTER_HORIZONTAL; topMargin = dp(8); bottomMargin = dp(16) })
+            addView(TextView(this@MainActivity).apply {
+                text = "Pedir qual domínio?"
+                textSize = 20f
+                setTextColor(getColor(R.color.nt_text))
+                setPadding(dp(24), 0, dp(24), dp(8))
+            })
+            levels.forEachIndexed { idx, lv ->
+                val rb = android.widget.RadioButton(this@MainActivity).apply {
+                    isChecked = idx == chosen
+                    buttonTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.nt_green))
+                    isClickable = false
+                    isFocusable = false
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }
+                radios += rb
+                val desc = when {
+                    idx == 0 -> "Só este endereço"
+                    idx == levels.size - 1 -> "O domínio inteiro, com tudo dentro dele"
+                    else -> "Este e tudo dentro dele"
+                }
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    minimumHeight = dp(64)
+                    setPadding(dp(16), dp(8), dp(24), dp(8))
+                    touchable()
+                    accessibilityDelegate = object : View.AccessibilityDelegate() {
+                        override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
+                            super.onInitializeAccessibilityNodeInfo(host, info)
+                            info.className = android.widget.RadioButton::class.java.name
+                            info.isCheckable = true
+                            info.isChecked = rb.isChecked
+                        }
+                    }
+                    setOnClickListener { chosen = idx; radios.forEachIndexed { k, r -> r.isChecked = k == idx } }
+                    addView(rb, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(12) })
+                    addView(twoLine(lv, desc), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                })
+            }
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(dp(24), dp(16), dp(24), 0)
+                fun pill(label: String, primary: Boolean, onClick: () -> Unit) = Button(this@MainActivity).apply {
+                    text = label
+                    isAllCaps = false
+                    textSize = 16f
+                    setTextColor(getColor(if (primary) R.color.nt_ink else R.color.nt_text))
+                    setBackgroundResource(if (primary) R.drawable.btn_primary else R.drawable.btn_secondary)
+                    minHeight = dp(52); minimumHeight = dp(52)
+                    setOnClickListener { onClick() }
+                }
+                addView(pill("Cancelar", false) { dlg.dismiss() }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(12) })
+                addView(pill("Marcar", true) {
+                    depth[b.domain] = chosen
+                    picked.add(b.domain)
+                    dlg.dismiss()
+                    render()
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            })
+        }
+        dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        dlg.setContentView(box)
+        dlg.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+            setGravity(android.view.Gravity.BOTTOM)
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+        sheetShown = dlg
+        dlg.show()
+    }
+
+    /** Só para os testes: a última folha de baixo aberta. */
+    internal var sheetShown: android.app.Dialog? = null
 
     private fun drawSites(d: BlockedData) {
         val now = System.currentTimeMillis() / 1000
@@ -618,15 +804,14 @@ class MainActivity : Activity() {
             render()
         }
         if (fresh.isEmpty()) {
-            section("Bloqueado")
-            text("Nada bloqueado nas últimas 24 horas. Tente abrir o site de novo e volte aqui.")
+            emptyState(R.drawable.ic_public, "Nada bloqueado nas últimas 24 h", "Tente abrir o site de novo e volte aqui. Para um app ou outro assunto, use “Outro pedido”.")
         } else {
             fun source(b: BlockedItem) = when {
-                b.own -> "regra própria"
+                b.own -> null
                 b.veto -> "vetado pelo guardião-mor (${b.list})"
                 else -> "lista " + b.list.ifEmpty { "do Pi-hole" }.let { if ("://" in it) it.substringAfter("://").substringBefore('/') else it }
             }
-            fun summary(b: BlockedItem) = "${b.count} vez${if (b.count > 1) "es" else ""} · ${UnblockText.ago(now, b.last)} · ${source(b)}"
+            fun summary(b: BlockedItem) = listOfNotNull("${b.count} vez${if (b.count > 1) "es" else ""}", UnblockText.ago(now, b.last), source(b)).joinToString(" · ")
             val recent = fresh.filter { now - it.last <= 900 }
             val older = fresh.filter { now - it.last > 900 }.take(60)
             if (recent.isNotEmpty()) {
@@ -637,11 +822,8 @@ class MainActivity : Activity() {
                 section("Antes · últimas 24 h")
                 older.forEach { b -> siteRow(b, summary(b)) }
             }
-            if (fresh.any { !it.own }) note("Itens sem caixa de marcar não podem ser pedidos por aqui. Se achar que é um erro, fale com o guardião.")
-            note("Limpar a lista só tira daqui o que já apareceu. O guardião continua vendo o registro dele.")
+            note("Toque no nome para escolher o domínio." + if (fresh.any { !it.own }) " Itens com “lista” ou “vetado” só o guardião libera." else "")
         }
-        section("Outro assunto")
-        button("Pedir um app ou outro assunto…", summary = "Texto livre, para o que o filtro não mostra") { manualDialog() }
         barMode = "sites"
         refreshBar()
     }
@@ -649,58 +831,68 @@ class MainActivity : Activity() {
     private fun drawApps(d: BlockedData) {
         val pending = PackageGuard.pending(this)
         pickedApps.retainAll(pending.toSet())
-        section("Apps suspensos")
-        text("Estes apps ficam suspensos até o guardião aprovar. Marque os que você precisa e peça a liberação. Se o guardião recusou por engano, o pedido o faz analisar de novo.")
         if (pending.isEmpty()) {
-            text("Nenhum app suspenso.")
+            emptyState(R.drawable.ic_apps, "Nenhum app suspenso", "Quando um app novo ficar suspenso até o guardião aprovar, ele aparece aqui para você pedir.")
         } else {
+            section("Suspensos até o guardião aprovar")
             for (pkg in pending) {
                 val refused = pkg in d.refused
-                pickRow(
-                    PackageGuard.label(this, pkg), if (refused) "Recusado pelo guardião" else "Aguardando o guardião",
-                    pkg in pickedApps, if (refused) R.color.nt_orange else R.color.nt_text,
+                checkRow(PackageGuard.label(this, pkg), pkg, pkg in pickedApps,
+                    if (refused) chip("recusado", R.drawable.ic_block, Chip.NO) else chip("suspenso", R.drawable.ic_schedule, Chip.WAIT),
                 ) { if (it) pickedApps.add(pkg) else pickedApps.remove(pkg) }
             }
+            note("Se o guardião recusou por engano, pedir de novo o faz analisar outra vez.")
         }
         barMode = "apps"
         refreshBar()
     }
 
     private fun drawRequests(api: UnblockApi, gateway: String, d: BlockedData) {
-        val requests = Cleared.requests(d.requests, remote.requestsClearedId)
+        val requests = Cleared.requests(d.requests, remote.requestsClearedId).filter { it.id !in cancelling }
         val open = requests.filter { it.status == "open" }
         val answered = requests.filter { it.status != "open" }.take(8)
         if (requests.isEmpty()) {
-            section(null)
-            text("Nenhum pedido ainda. Marque o que você precisa em Sites ou Apps.")
+            emptyState(R.drawable.ic_send, "Nenhum pedido ainda", "Marque o que você precisa em Sites ou Apps e toque em “Pedir liberação”.")
             return
         }
+        if (open.isNotEmpty()) section("Aguardando o guardião")
         for (r in open) {
+            if (r !== open.first()) section(null)
             val n = r.items.count { it.state == "open" }
-            section("Aguardando o guardião · $n ${if (n > 1) "itens" else "item"}")
-            r.items.forEach { content.addView(rowOf(it.domain, UnblockText.stateLabel(it))) }
-            button("Enviar link ao guardião", summary = "Ele não é avisado sozinho: mande o link por mensagem") {
-                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(android.content.Intent.EXTRA_TEXT, "Pedi a liberação de $n ${if (n > 1) "itens" else "item"} no NotToday: $gateway/#/domains/pedidos")
-                }
-                startActivity(android.content.Intent.createChooser(send, "Enviar ao guardião"))
-            }
-            button("Cancelar este pedido") {
-                runAsync {
-                    try {
-                        api.cancel(r.id)
-                    } catch (e: Exception) {
-                        runOnUiThread { toast("Não foi possível cancelar: ${e.message}") }
+            content.addView(LinearLayout(this).apply {
+                tag = SettingsPage.ROW
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(dp(16), dp(14), dp(16), dp(4))
+                addView(chip("aguardando", R.drawable.ic_schedule, Chip.WAIT))
+                addView(TextView(this@MainActivity).apply {
+                    text = "pedido nº ${r.id} · $n ${if (n > 1) "itens" else "item"}"
+                    textSize = 13f
+                    setTextColor(getColor(R.color.nt_muted))
+                    setPadding(dp(8), 0, 0, 0)
+                })
+            })
+            r.items.forEach { content.addView(rowOf(it.domain, null)) }
+            content.addView(LinearLayout(this).apply {
+                tag = SettingsPage.ROW
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
+                setPadding(dp(8), dp(4), dp(8), dp(8))
+                addView(textAction("Cancelar", null, R.color.nt_red) { cancelRequest(api, r) })
+                addView(textAction("Enviar ao guardião", R.drawable.ic_share, R.color.nt_green) {
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(android.content.Intent.EXTRA_TEXT, "Pedi a liberação de $n ${if (n > 1) "itens" else "item"} no NotToday: $gateway/#/domains/pedidos")
                     }
-                    runOnUiThread { blockedData = null; render(); loadBlocked() }
-                }
-            }
+                    startActivity(android.content.Intent.createChooser(send, "Enviar ao guardião"))
+                })
+            })
         }
+        if (open.isNotEmpty()) note("O guardião não é avisado sozinho: use “Enviar ao guardião” para mandar o link.")
         if (answered.isNotEmpty()) {
             section("Respondidos")
             answered.forEach { r ->
-                r.items.forEach { content.addView(rowOf(it.domain, UnblockText.stateLabel(it), if (it.state == "denied") R.color.nt_orange else R.color.nt_text)) }
+                r.items.forEach { content.addView(rowOf(it.domain, null, trailing = stateChip(it))) }
             }
             headerActions = listOf(Triple(R.drawable.ic_delete_sweep, "Limpar os respondidos") {
                 val before = remote.requestsClearedId
@@ -711,13 +903,72 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun stateChip(i: com.allan.nottoday.remote.RequestItem): View = when (i.state) {
+        "allowed" -> if (i.ttlS == null) chip("liberado", R.drawable.ic_check_circle, Chip.OK)
+        else chip(UnblockText.stateLabel(i).removePrefix("liberado "), R.drawable.ic_schedule, Chip.OK)
+        "denied" -> chip("negado", R.drawable.ic_block, Chip.NO)
+        "open" -> chip("aguardando", R.drawable.ic_schedule, Chip.WAIT)
+        "failed" -> chip("não aplicado", R.drawable.ic_block, Chip.WAIT)
+        else -> chip("cancelado", null, Chip.NEUTRAL)
+    }
+
+    /** Cancelar some na hora e pode ser desfeito por alguns segundos; só depois o pedido é cancelado no gateway. */
+    private fun cancelRequest(api: UnblockApi, r: UnblockRequest) {
+        cancelling += r.id
+        render()
+        val commit = Runnable {
+            if (r.id !in cancelling) return@Runnable
+            runAsync {
+                val err = try { api.cancel(r.id); null } catch (e: Exception) { e.message ?: e.javaClass.simpleName }
+                runOnUiThread {
+                    cancelling -= r.id
+                    if (err != null) toast("Não foi possível cancelar: $err")
+                    if (showBlocked) { blockedData = null; render(); loadBlocked() }
+                }
+            }
+        }
+        undoBarView.postDelayed(commit, 6000)
+        showUndo("Pedido cancelado") {
+            undoBarView.removeCallbacks(commit)
+            cancelling -= r.id
+            render()
+        }
+    }
+
+    /** Botão de texto de um cartão (Material 3 "text button"): rótulo com ícone opcional, 48 dp de altura. */
+    private fun textAction(label: String, iconRes: Int?, color: Int, onClick: () -> Unit) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = android.view.Gravity.CENTER
+        minimumHeight = dp(48)
+        minimumWidth = dp(64)
+        setPadding(dp(12), 0, dp(12), 0)
+        touchable()
+        accessibilityDelegate = object : View.AccessibilityDelegate() {
+            override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
+                super.onInitializeAccessibilityNodeInfo(host, info)
+                info.className = Button::class.java.name
+            }
+        }
+        setOnClickListener { onClick() }
+        if (iconRes != null) addView(icon(iconRes, color), LinearLayout.LayoutParams(dp(18), dp(18)).apply { marginEnd = dp(8) })
+        addView(TextView(this@MainActivity).apply {
+            text = label
+            textSize = 15f
+            setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL))
+            setTextColor(getColor(color))
+        })
+    }
+
     /** Linha só de leitura (título e resumo). */
-    private fun rowOf(title: String, summary: String?, titleColor: Int = R.color.nt_text): View =
-        twoLine(title, summary, titleColor).apply {
+    private fun rowOf(title: String, summary: String?, titleColor: Int = R.color.nt_text, trailing: View? = null): View =
+        LinearLayout(this).apply {
             tag = SettingsPage.ROW
+            orientation = LinearLayout.HORIZONTAL
             minimumHeight = dp(56)
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(dp(16), dp(12), dp(16), dp(12))
+            addView(twoLine(title, summary, titleColor), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            if (trailing != null) addView(trailing, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
         }
 
     /** Barra fixa de baixo da tela de pedidos: quantos estão marcados, limpar a seleção e pedir. */
@@ -728,6 +979,9 @@ class MainActivity : Activity() {
             else -> 0
         }
         requestBarView.visibility = if (showBlocked && n > 0) View.VISIBLE else View.GONE
+        val fab = showBlocked && n == 0 && blockedData != null && blockedTab != "requests"
+        fabView.visibility = if (fab) View.VISIBLE else View.GONE
+        content.setPadding(content.paddingLeft, content.paddingTop, content.paddingRight, dp(if (fab) 96 else 32)) // a lista não fica sob o botão
         requestButton.text = "Pedir liberação · $n"
         requestLabel.text = if (n > MAX_ASK) "Vão só os $MAX_ASK primeiros" else ""
         requestLabel.visibility = if (n > MAX_ASK) View.VISIBLE else View.GONE

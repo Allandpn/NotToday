@@ -61,7 +61,7 @@ class UiAuditTest {
     private fun bg(v: View, a: Activity): Int {
         var p: View? = v
         while (p != null) {
-            color(p.background)?.let { if (Color.alpha(it) > 200) return it }
+            (p.backgroundTintList?.defaultColor ?: color(p.background))?.let { if (Color.alpha(it) > 200) return it } // o tint vence a cor da forma
             p = p.parent as? View
         }
         return a.getColor(R.color.nt_bg)

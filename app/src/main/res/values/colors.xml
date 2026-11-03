@@ -21,4 +21,11 @@
     <color name="nt_warn_container">#3B3022</color>
     <color name="nt_warn_circle">#5A4428</color>
     <color name="nt_on_warn">#E6D3BC</color>
+    <!-- Selos de estado (chips): fundo escuro do tom e texto claro do mesmo tom, contraste acima de 4,5:1. -->
+    <color name="nt_chip_ok">#1F4A45</color>
+    <color name="nt_on_chip_ok">#7FE0D3</color>
+    <color name="nt_chip_wait">#4A3A24</color>
+    <color name="nt_on_chip_wait">#FFCF9F</color>
+    <color name="nt_chip_no">#4A2A26</color>
+    <color name="nt_on_chip_no">#FFB3A3</color>
 </resources>
