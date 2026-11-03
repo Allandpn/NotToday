@@ -145,7 +145,7 @@ class UiAuditTest {
         run {
             var a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
             audit(a, "definir-pin$s")
-            tap(a, "Parear com Guardian remoto"); audit(a, "parear$s")
+            tap(a, "Prefiro parear com o guardião"); audit(a, "parear$s")
             a.finish()
 
             val store = RemoteStore(ctx)
