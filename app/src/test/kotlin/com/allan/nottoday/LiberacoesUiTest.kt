@@ -47,11 +47,8 @@ class LiberacoesUiTest {
     private fun action(desc: String): View? = views(header()).firstOrNull { it.contentDescription == desc }
     private fun headerText(): String = views(header()).filterIsInstance<TextView>().joinToString(" ") { it.text.toString() }
     private fun texts(): List<String> = views().filterIsInstance<TextView>().map { it.text.toString() }
-    private fun row(text: String): View {
-        var v: View = views().filterIsInstance<TextView>().first { it.text.toString() == text }
-        while (!v.isClickable) v = v.parent as View
-        return v
-    }
+    /** A caixa de marcar da linha (à esquerda): marca sem abrir a escolha do domínio. */
+    private fun row(text: String): View = views().first { it.contentDescription == "Marcar $text" }
     private fun idle() = shadowOf(android.os.Looper.getMainLooper()).idle()
 
     @Before
@@ -127,5 +124,57 @@ class LiberacoesUiTest {
         action("Limpar os respondidos")!!.performClick()
         assertFalse(texts().contains("docs.exemplo.org"))
         assertEquals("Respondidos limpos", views(views().first { it.tag == "undobar" }).filterIsInstance<TextView>().first().text.toString())
+    }
+
+    private fun sheetViews(): List<View> = views(a.sheetShown!!.window!!.decorView)
+    private fun tapIn(list: List<View>, text: String) {
+        var v: View = list.filterIsInstance<TextView>().first { it.text.toString() == text }
+        while (!v.isClickable) v = v.parent as View
+        v.performClick(); idle()
+    }
+
+    @Test
+    fun tappingTheNameOpensTheDomainSheetAndMarksTheChosenLevel() {
+        tapIn(views(), "cdn.video.exemplo.com")
+        assertTrue(a.sheetShown!!.isShowing)
+        val sv = sheetViews().filterIsInstance<TextView>().map { it.text.toString() }
+        assertTrue(sv.containsAll(listOf("Pedir qual domínio?", "cdn.video.exemplo.com", "video.exemplo.com", "exemplo.com", "Só este endereço")))
+        tapIn(sheetViews(), "video.exemplo.com")
+        tapIn(sheetViews(), "Marcar")
+        assertFalse(a.sheetShown!!.isShowing)
+        assertTrue(texts().contains("video.exemplo.com"))
+        assertTrue(texts().any { it.startsWith("vale para *.video.exemplo.com") })
+        assertTrue(headerText().contains("1 selecionado"))
+    }
+
+    @Test
+    fun listBlocksShowAChipAndCannotBeMarked() {
+        assertTrue(texts().contains("lista"))
+        assertFalse(views().any { it.contentDescription == "Marcar img.rastreador.net" })
+    }
+
+    @Test
+    fun theFabIsOnlyOnSitesAndAppsAndHidesWhileSelecting() {
+        fun fab() = views().any { it.tag == "fab" }
+        assertTrue(fab())
+        row("cdn.video.exemplo.com").performClick()
+        assertFalse("no modo de seleção o botão flutuante some", fab())
+        action("Desmarcar tudo")!!.performClick()
+        a.debugShowBlocked(items, reqs, "requests"); idle()
+        assertFalse(fab())
+    }
+
+    @Test
+    fun requestsShowStateChipsAndCancelCanBeUndone() {
+        val open = listOf(UnblockRequest(7, "open", listOf(RequestItem("noticias.exemplo.com", "open", null)))) + reqs
+        a.debugShowBlocked(items, open, "requests"); idle()
+        assertTrue(texts().containsAll(listOf("aguardando", "liberado", "Enviar ao guardião", "Cancelar")))
+        assertTrue(views().any { it.contentDescription?.toString() == "Pedidos, 1 aberto" })
+        tapIn(views(), "Cancelar")
+        assertFalse(texts().contains("noticias.exemplo.com"))
+        val undo = views().first { it.tag == "undobar" }
+        assertTrue(views(undo).filterIsInstance<TextView>().any { it.text.toString() == "Pedido cancelado" })
+        views(undo).filterIsInstance<TextView>().first { it.text.toString() == "Desfazer" }.performClick(); idle()
+        assertTrue(texts().contains("noticias.exemplo.com"))
     }
 }

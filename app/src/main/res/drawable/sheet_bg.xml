@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Folha de baixo (bottom sheet) do Material 3: cantos de cima bem arredondados. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/nt_surface" />
+    <corners android:topLeftRadius="28dp" android:topRightRadius="28dp" />
+</shape>

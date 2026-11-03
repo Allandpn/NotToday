@@ -71,8 +71,36 @@ class ScreenshotTest {
             bar.layout(0, 0, w, barH)
             bar.draw(c)
         }
+        val fab = views(a.window.decorView).firstOrNull { it.tag == "fab" && it.visibility == View.VISIBLE }
+        if (fab != null) { // o botão flutuante fica sobre a lista, no canto de baixo
+            c.setMatrix(null)
+            fab.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            fab.layout(0, 0, fab.measuredWidth, fab.measuredHeight)
+            val m = (16 * a.resources.displayMetrics.density).toInt()
+            c.translate((w - fab.measuredWidth - m).toFloat(), (scroll.height - fab.measuredHeight - m).toFloat())
+            fab.draw(c)
+        }
         File(dir!!).mkdirs()
         File(dir, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    /** A folha de baixo por cima da tela, escurecida como no aparelho. */
+    private fun sheet(a: MainActivity, name: String) {
+        shadowOf(android.os.Looper.getMainLooper()).idle()
+        val root = a.window.decorView
+        val bg = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bg)
+        c.drawColor(a.getColor(R.color.nt_bg))
+        root.draw(c)
+        c.drawColor(0x99000000.toInt())
+        val sv = a.sheetShown!!.window!!.decorView
+        val box = (sv as ViewGroup).let { views(it).first { v -> v.tag == "sheet" } }
+        box.measure(View.MeasureSpec.makeMeasureSpec(root.width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        box.layout(0, 0, root.width, box.measuredHeight)
+        c.translate(0f, (root.height - box.measuredHeight).toFloat())
+        box.draw(c)
+        File(dir!!).mkdirs()
+        File(dir, "$name.png").outputStream().use { bg.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
     private fun paired(fingerprint: String = "ut3n-vwhl-icrd-ngl4-7mdl") {
@@ -135,6 +163,13 @@ class ScreenshotTest {
         shot(a, "08-liberacoes-sites")
         a.debugShowBlocked(items, reqs, "domains", setOf("cdn.video.exemplo.com", "api.video.exemplo.com"))
         shot(a, "08b-liberacoes-sites-selecao")
+        a.debugShowBlocked(items, reqs, "domains")
+        var t: View = views(a.window.decorView).filterIsInstance<android.widget.TextView>().first { it.text.toString() == "cdn.video.exemplo.com" }
+        while (!t.isClickable) t = t.parent as View
+        t.performClick()
+        shadowOf(android.os.Looper.getMainLooper()).idle()
+        sheet(a, "08c-liberacoes-escolher-dominio")
+        a.sheetShown!!.dismiss()
         a.debugShowBlocked(items, reqs, "requests")
         shot(a, "09-liberacoes-pedidos")
         a.debugShowBlocked(items, emptyList(), "apps")
