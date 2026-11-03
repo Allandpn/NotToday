@@ -464,13 +464,45 @@ class MainActivity : Activity() {
     /** Na tela de bloqueio: a ação de quem usa o aparelho, secundária ao "Entrar" (que é da pessoa de confiança). */
     private fun renderRequestToGuardian() {
         if (!remote.isPaired) return
-        content.addLoose(TextView(this).apply {
-            text = "Precisa de um site ou app?"
-            textSize = 14f
-            gravity = android.view.Gravity.CENTER
-            setTextColor(getColor(R.color.nt_muted))
-        }, matchWrap.apply { topMargin = dp(48) })
-        actionButton("Pedir liberação ao guardião", R.drawable.ic_send, Style.TONAL) { openLiberacoes() }
+        content.addLoose(
+            LinearLayout(this).apply {
+                tag = "requesthero"
+                orientation = LinearLayout.VERTICAL
+                setBackgroundResource(R.drawable.status_ok)
+                setPadding(dp(20), dp(20), dp(20), dp(20))
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    addView(circleIcon(R.drawable.ic_public, R.drawable.circle_ok, R.color.nt_on_ok, 48, 28))
+                    addView(LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        addView(TextView(this@MainActivity).apply {
+                            text = "Precisa de um site ou app?"
+                            textSize = 18f
+                            setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL))
+                            setTextColor(getColor(R.color.nt_text))
+                        })
+                        addView(TextView(this@MainActivity).apply {
+                            text = "Veja o que foi bloqueado e peça ao guardião."
+                            textSize = 14f
+                            setTextColor(getColor(R.color.nt_muted))
+                            setPadding(0, dp(2), 0, 0)
+                        })
+                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(16) })
+                })
+                addView(Button(this@MainActivity).apply {
+                    text = "Pedir liberação"
+                    isAllCaps = false
+                    textSize = 16f
+                    setTextColor(getColor(R.color.nt_ink))
+                    setBackgroundResource(R.drawable.btn_primary)
+                    minHeight = dp(52); minimumHeight = dp(52)
+                    setPadding(dp(24), 0, dp(24), 0)
+                    setOnClickListener { openLiberacoes() }
+                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(16) })
+            },
+            matchWrap.apply { topMargin = dp(4) },
+        )
     }
 
     // --- Liberações ------------------------------------------------------------------------------------
@@ -1202,22 +1234,32 @@ class MainActivity : Activity() {
 
     private var unlockError: String? = null
 
+    /**
+     * Tela de bloqueio. Quem mais a vê é quem usa o aparelho: com pareamento, o destaque (topo, único botão laranja) é pedir
+     * liberação. O PIN da pessoa de confiança e a janela de desenvolvimento ficam embaixo, cada um no seu grupo.
+     */
     private fun renderUnlock(owner: Boolean) {
+        val paired = remote.isPaired
+        title("NotToday")
+        if (paired) renderRequestToGuardian() else lockHeader("Digite o PIN da pessoa de confiança")
+        section("Pessoa de confiança")
         val locked = pins.lockedForMs()
-        lockHeader(if (locked > 0) "Muitas tentativas. Tente de novo em ${(locked / 60_000) + 1} min." else "Digite o PIN da pessoa de confiança")
         if (locked > 0) {
-            actionButton("Tentar de novo", R.drawable.ic_refresh, Style.TONAL) { render() }
+            text("Muitas tentativas. Tente de novo em ${(locked / 60_000) + 1} min.")
+            button("Tentar de novo") { render() }
         } else {
-            val pin = pinField("PIN", loose = true, helper = unlockError, error = unlockError != null).apply {
-                gravity = android.view.Gravity.CENTER
-                textSize = 22f
-                letterSpacing = 0.3f
+            val pin = pinField("PIN", helper = unlockError, error = unlockError != null).apply {
                 setOnEditorActionListener { _, _, _ -> performUnlock(this); true }
             }
-            button("Entrar", primary = true) { performUnlock(pin) }
+            // Sem pareamento o PIN é a única ação da tela e fica laranja; com pareamento o laranja é do pedido.
+            if (paired) actionButton("Entrar", R.drawable.ic_lock, Style.TONAL) { performUnlock(pin) }
+            else button("Entrar", primary = true) { performUnlock(pin) }
         }
         if (owner) renderDevWindowLogin()
-        renderRequestToGuardian()
+        if (paired) { // o PIN não pega o foco sozinho: o teclado só abre quando a pessoa de confiança toca no campo
+            content.isFocusableInTouchMode = true
+            content.requestFocus()
+        }
     }
 
     private fun performUnlock(pin: EditText) {
