@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Chave principal da tela (Material 3 / Configurações do Android): bloco arredondado, tingido quando ligada. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#33EEF3F2">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/nt_surface2" />
+            <corners android:radius="28dp" />
+        </shape>
+    </item>
+</ripple>

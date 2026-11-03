@@ -326,15 +326,24 @@ class MainActivity : Activity() {
     // --- Guardian remoto -------------------------------------------------------------
 
     private fun renderPair() {
-        title("Parear com Guardian remoto")
-        text("No site do Guardian: Guardiões → Parear aparelho. Cole aqui a string gerada (vale 24 h, uso único).")
-        val str = field("String de pareamento", "cole aqui o texto copiado do site") {
+        subTitle("Parear com o guardião")
+        section(null)
+        step(1, "No site do Guardian: Guardiões → Parear aparelho")
+        step(2, "Copie o código (vale 24 h, uso único) e cole aqui")
+        var str: EditText? = null
+        str = field("Código de pareamento", "cole o código do site", loose = true,
+            labelAction = Triple("Colar", R.drawable.ic_content_paste) {
+                val clip = getSystemService(android.content.ClipboardManager::class.java).primaryClip
+                val t = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()?.trim()
+                if (t.isNullOrEmpty()) toast("Nada copiado") else str?.setText(t)
+            }) {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             minLines = 3
+            gravity = android.view.Gravity.TOP or android.view.Gravity.START
         }
-        val name = field("Nome deste aparelho") { setText(android.os.Build.MODEL ?: "Aparelho") }
+        val name = field("Nome deste aparelho", loose = true) { setText(android.os.Build.MODEL ?: "Aparelho") }
         button("Parear", primary = true) {
-            val s = str.text.toString()
+            val s = str!!.text.toString()
             val n = name.text.toString()
             val parsed = try {
                 Pairing.parse(s)
@@ -353,11 +362,33 @@ class MainActivity : Activity() {
                 .setPositiveButton("Parear") { _, _ -> register(s, n) }
                 .show()
         }
-        button("Voltar") {
-            pairing = false
-            render()
-        }
     }
+
+    /** Passo numerado (um círculo com o número e a instrução). */
+    private fun step(n: Int, s: String) = content.addView(LinearLayout(this).apply {
+        tag = SettingsPage.ROW
+        orientation = LinearLayout.HORIZONTAL
+        gravity = android.view.Gravity.CENTER_VERTICAL
+        minimumHeight = dp(56)
+        setPadding(dp(16), dp(8), dp(16), dp(8))
+        addView(TextView(this@MainActivity).apply {
+            text = n.toString()
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = android.view.Gravity.CENTER
+            setTextColor(getColor(R.color.nt_text))
+            setBackgroundResource(R.drawable.circle_neutral)
+            includeFontPadding = false
+            minWidth = dp(28); minHeight = dp(28)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(16) })
+        addView(TextView(this@MainActivity).apply {
+            text = s
+            textSize = 15f
+            setTextColor(getColor(R.color.nt_text))
+            contentDescription = "Passo $n: $s"
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+    })
 
     private fun register(pairingString: String, name: String) {
         logView.text = "Pareando…"
@@ -382,26 +413,54 @@ class MainActivity : Activity() {
 
     /** Pareado e ainda sem PIN: só o guardião (pelo site) pode definir o PIN. Aqui nada é criado. */
     private fun renderAwaitingGuardian(owner: Boolean) {
-        title("Aguardando o guardião")
-        text("Este aparelho está pareado com um Guardian remoto. Leia o fingerprint para ele conferir:")
+        subTitle("Aguardando o guardião", back = false, onRefresh = { render() })
+        lead("Confira por voz com o guardião se o código é o mesmo no site:")
         fingerprintBox(remote.fingerprint ?: "?")
-        text("Confira por voz com o guardião; ele define o PIN pelo site e envia a ativação. Aqui nenhum PIN pode ser criado.")
-        cardText(
-            "Canal: ${RemoteChannel.status}" + (Diag.lastError?.let { "\nErro: $it" } ?: "") +
-                "\n" + (if (pins.isSet) "PIN definido pelo guardião." else "PIN: aguardando o guardião.") +
-                "\n" + (if (remote.activated) "Ativado pelo guardião." else "Ativação: aguardando o guardião."),
+        section(null)
+        val canal = "Canal: ${RemoteChannel.status}" + (Diag.lastError?.let { " · Erro: $it" } ?: "")
+        progressRow(R.drawable.ic_check_circle, R.color.nt_on_chip_ok, "Pareado", "${remote.gateway?.removePrefix("https://") ?: ""} · $canal", null)
+        progressRow(
+            if (pins.isSet) R.drawable.ic_check_circle else R.drawable.ic_schedule, if (pins.isSet) R.color.nt_on_chip_ok else R.color.nt_orange,
+            "PIN", "O guardião define pelo site", if (pins.isSet) chip("definido", null, Chip.OK) else chip("aguardando", null, Chip.WAIT),
+        )
+        progressRow(
+            if (remote.activated) R.drawable.ic_check_circle else R.drawable.ic_hourglass_empty, if (remote.activated) R.color.nt_on_chip_ok else R.color.nt_muted,
+            "Ativação", "Depois do PIN, o guardião ativa", when {
+                remote.activated -> chip("ativado", null, Chip.OK)
+                pins.isSet -> chip("aguardando", null, Chip.WAIT)
+                else -> chip("depois", null, Chip.NEUTRAL)
+            },
         )
         if (!owner) {
-            text("Ative o Device Owner só depois que o guardião ativar: adb shell dpm set-device-owner $packageName/.AdminReceiver")
-            button("Desfazer o pareamento") {
-                Pairing.unpair(this)
-                render()
+            note("Ative o Device Owner só depois da ativação: adb shell dpm set-device-owner $packageName/.AdminReceiver")
+            content.addLoose(View(this), LinearLayout.LayoutParams(1, dp(24)))
+            actionButton("Desfazer o pareamento", R.drawable.ic_link_off, Style.TEXT_DANGER) {
+                AlertDialog.Builder(this)
+                    .setTitle("Desfazer o pareamento?")
+                    .setMessage("O guardião deixa de controlar este aparelho pelo site.")
+                    .setNegativeButton("Cancelar", null)
+                    .setPositiveButton("Desfazer") { _, _ ->
+                        Pairing.unpair(this)
+                        render()
+                    }
+                    .show()
             }
         }
-        button("Atualizar") { render() }
     }
 
-    /** Entrada na tela de bloqueio: leva à lista do que foi bloqueado. Pedido ao guardião não usa PIN e não concede nada. */
+    /** Linha de progresso: ícone de estado, etapa, explicação e um selo. */
+    private fun progressRow(iconRes: Int, iconColor: Int, titleText: String, summary: String, trailing: View?) =
+        content.addView(LinearLayout(this).apply {
+            tag = SettingsPage.ROW
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            minimumHeight = dp(64)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            addView(icon(iconRes, iconColor), LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(16) })
+            addView(twoLine(titleText, summary), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            if (trailing != null) addView(trailing, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
+        })
+
     /** Na tela de bloqueio: a ação de quem usa o aparelho, secundária ao "Entrar" (que é da pessoa de confiança). */
     private fun renderRequestToGuardian() {
         if (!remote.isPaired) return
@@ -1339,12 +1398,12 @@ class MainActivity : Activity() {
     }
 
     /** Título de subtela com a seta de voltar, como nas Configurações. */
-    private fun subTitle(s: String, onRefresh: (() -> Unit)? = null) = content.addLoose(
+    private fun subTitle(s: String, onRefresh: (() -> Unit)? = null, back: Boolean = true) = content.addLoose(
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(0, dp(28), dp(8), dp(12))
-            addView(android.widget.ImageButton(this@MainActivity).apply {
+            if (back) addView(android.widget.ImageButton(this@MainActivity).apply {
                 setImageResource(R.drawable.ic_back)
                 contentDescription = "Voltar"
                 val tv = android.util.TypedValue()
@@ -1354,9 +1413,9 @@ class MainActivity : Activity() {
             }, LinearLayout.LayoutParams(dp(48), dp(48)))
             addView(TextView(this@MainActivity).apply {
                 text = s
-                textSize = 28f
+                textSize = if (back) 28f else 26f
                 setTextColor(getColor(R.color.nt_text))
-                setPadding(dp(8), 0, 0, 0)
+                setPadding(dp(if (back) 8 else 16), 0, 0, 0)
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             if (onRefresh != null) addView(android.widget.ImageButton(this@MainActivity).apply {
                 setImageResource(R.drawable.ic_refresh)
@@ -1374,8 +1433,9 @@ class MainActivity : Activity() {
         switchRow(label, draft()[key] == "true", hint).apply { setOnCheckedChangeListener { _, on -> draft()[key] = on.toString(); refreshSave() } }
 
     /** Campo de texto ligado a uma chave do rascunho. `toValue` devolve null quando o texto não serve (fica o valor anterior). */
-    private fun bindField(key: String, label: String, shown: String, type: Int, hintText: String? = null, toValue: (String) -> String?): EditText =
-        field(label, hintText) {
+    private fun bindField(key: String, label: String, shown: String, type: Int, hintText: String? = null, helper: String? = null,
+                          toValue: (String) -> String?): EditText =
+        field(label, hintText, helper = helper) {
             setText(shown)
             inputType = type
             addTextChangedListener(object : android.text.TextWatcher {
@@ -1390,12 +1450,47 @@ class MainActivity : Activity() {
 
     private fun pkgList(t: String) = t.split(',', ' ').map { it.trim() }.filter { it.isNotEmpty() }.joinToString(",")
 
+    /** Restrições por assunto, como nas Configurações; o título dentro do grupo dispensa o "Bloquear" de cada linha. */
+    private val restrictionGroups = listOf(
+        "Rede" to setOf(
+            UserManager.DISALLOW_CONFIG_TETHERING, UserManager.DISALLOW_WIFI_TETHERING, UserManager.DISALLOW_WIFI_DIRECT,
+            UserManager.DISALLOW_NETWORK_RESET, UserManager.DISALLOW_CONFIG_PRIVATE_DNS, UserManager.DISALLOW_CONFIG_VPN,
+            UserManager.DISALLOW_CONFIG_WIFI, UserManager.DISALLOW_CONFIG_MOBILE_NETWORKS,
+        ),
+        "Apps" to setOf(
+            UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY, UserManager.DISALLOW_INSTALL_APPS,
+            UserManager.DISALLOW_UNINSTALL_APPS, UserManager.DISALLOW_APPS_CONTROL,
+        ),
+        "Contas e usuários" to setOf(
+            UserManager.DISALLOW_ADD_USER, UserManager.DISALLOW_ADD_MANAGED_PROFILE, UserManager.DISALLOW_ADD_PRIVATE_PROFILE,
+            "no_add_clone_profile", UserManager.DISALLOW_MODIFY_ACCOUNTS, UserManager.DISALLOW_USER_SWITCH,
+        ),
+        "Sistema" to setOf(
+            UserManager.DISALLOW_SAFE_BOOT, UserManager.DISALLOW_CONFIG_DATE_TIME, UserManager.DISALLOW_USB_FILE_TRANSFER,
+            UserManager.DISALLOW_FACTORY_RESET, UserManager.DISALLOW_DEBUGGING_FEATURES,
+        ),
+    )
+
+    private fun shortLabel(label: String) = label.removePrefix("Bloquear ").replaceFirstChar { it.uppercase() }
+
     private fun renderSubpage(key: String, owner: Boolean) {
         subTitle(pages.first { it.first == key }.second)
         val d = draft()
         val num = InputType.TYPE_CLASS_NUMBER
         when (key) {
-            "restricoes" -> Catalog.restrictions.forEach { bindSwitch("r_${it.key}", it.label, it.warning) }
+            "restricoes" -> {
+                lead("Ligado = bloqueado. ${Catalog.restrictions.count { d["r_${it.key}"] == "true" }} de ${Catalog.restrictions.size} ligadas.")
+                for ((group, keys) in restrictionGroups) {
+                    section(group)
+                    Catalog.restrictions.filter { it.key in keys }.forEach { bindSwitch("r_${it.key}", shortLabel(it.label), it.warning) }
+                }
+                // O que o catálogo tiver a mais e não estiver em grupo nenhum não some da tela.
+                val rest = Catalog.restrictions.filter { r -> restrictionGroups.none { r.key in it.second } }
+                if (rest.isNotEmpty()) {
+                    section("Outras")
+                    rest.forEach { bindSwitch("r_${it.key}", shortLabel(it.label), it.warning) }
+                }
+            }
             "lojas" -> {
                 bindSwitch(
                     "suspend_blocked", "Suspender lojas alternativas e instaladores de pacote",
@@ -1407,26 +1502,56 @@ class MainActivity : Activity() {
                 bindField("store_extra", "Pacotes", d["store_extra"].orEmpty().replace(",", ", "), InputType.TYPE_CLASS_TEXT) { pkgList(it) }
             }
             "filtro" -> {
-                text(
-                    "O Tailscale vira a VPN sempre ativa e leva ao seu servidor DNS filtrante (Pi-hole, AdGuard Home etc., " +
-                        "definido como DNS da tailnet) só os apps marcados. Instale o Tailscale e faça " +
-                        "login ANTES de ativar o Device Owner. Você liga e desliga o Tailscale no app dele.",
-                )
-                bindSwitch("dns_filter", "Filtro ativo (Tailscale sempre ativo)")
+                mainSwitch("dns_filter", "Usar filtro DNS")
+                content.addLoose(LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    setPadding(dp(8), dp(4), 0, 0)
+                    addView(TextView(this@MainActivity).apply {
+                        text = "Os apps marcados passam pelo servidor que filtra, via Tailscale."
+                        textSize = 14f
+                        setTextColor(getColor(R.color.nt_muted))
+                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                    addView(textAction("Saiba mais", null, R.color.nt_green) {
+                        AlertDialog.Builder(this@MainActivity)
+                            .setTitle("Filtro DNS")
+                            .setMessage(
+                                "O Tailscale vira a VPN sempre ativa e leva ao seu servidor DNS filtrante (Pi-hole, AdGuard Home etc., " +
+                                    "definido como DNS da tailnet) só os apps marcados.\n\nInstale o Tailscale e faça login ANTES de " +
+                                    "ativar o Device Owner. Você liga e desliga o Tailscale no app dele.",
+                            )
+                            .setPositiveButton("Entendi", null)
+                            .show()
+                    })
+                }, matchWrap)
+                section(null)
                 bindSwitch(
                     "browsers_need_filter", "Apps marcados só funcionam com o filtro confirmado",
                     "Sem VPN ou com o canário resolvendo, os apps marcados são suspensos; os demais seguem com internet.",
                 )
                 section("Domínio-canário")
-                text("Um domínio REAL (existente) que o seu servidor DNS mantém bloqueado. Sem ele, os apps marcados ficam suspensos.")
-                bindField("canary", "Domínio", d["canary"].orEmpty(), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI, "ex.: canario.exemplo.com") {
+                if (d["canary"].isNullOrBlank()) content.addView(LinearLayout(this).apply {
+                    tag = SettingsPage.ROW
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    setPadding(dp(16), dp(14), dp(16), dp(2))
+                    addView(chip("não definido", R.drawable.ic_warning, Chip.WAIT))
+                    addView(TextView(this@MainActivity).apply {
+                        text = "os apps marcados ficam suspensos"
+                        textSize = 13f
+                        setTextColor(getColor(R.color.nt_muted))
+                        setPadding(dp(8), 0, 0, 0)
+                    })
+                })
+                bindField("canary", "Domínio", d["canary"].orEmpty(), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI,
+                    "ex.: canario.exemplo.com", helper = "Um domínio real que o seu servidor DNS mantém bloqueado") {
                     it.trim().lowercase()
                 }
-                section("Apps no filtro")
+                section(null)
                 val extra = d["routed_extra"].orEmpty().split(',').filter { it.isNotEmpty() }.toSet()
                 val exempt = d["browsers_exempt"].orEmpty().split(',').filter { it.isNotEmpty() }.toSet()
                 val inFilter = ((Browsers.installed(this) - exempt) + extra).distinct().joinToString { PackageGuard.label(this, it) }
-                button("Escolher apps que passam pelo filtro", summary = inFilter.ifEmpty { "Nenhum app" }) {
+                navRow("Apps que passam pelo filtro", inFilter.ifEmpty { "Nenhum app" }, R.drawable.ic_apps) {
                     pickApps(extra, exempt) { e, x ->
                         draft()["routed_extra"] = e.sorted().joinToString(",")
                         draft()["browsers_exempt"] = x.sorted().joinToString(",")
@@ -1562,7 +1687,6 @@ class MainActivity : Activity() {
         backRegistered = want
     }
 
-    /** Estado do filtro: VPN, canário e erro recente. */
     /**
      * O cartão do topo do início responde "estou protegido?": verde quando o Device Owner está ativo e o filtro (se ligado)
      * está confirmado; âmbar, com o motivo e o que fazer, quando não.
@@ -2101,7 +2225,8 @@ class MainActivity : Activity() {
      * não serve de rótulo), e com no mínimo 48dp de altura para o toque.
      */
     private fun field(label: String, example: String? = null, parent: ViewGroup = content, loose: Boolean = false,
-                      helper: String? = null, error: Boolean = false, setup: EditText.() -> Unit = {}): EditText {
+                      helper: String? = null, error: Boolean = false, labelAction: Triple<String, Int, () -> Unit>? = null,
+                      setup: EditText.() -> Unit = {}): EditText {
         val f = EditText(this).apply {
             id = View.generateViewId()
             hint = example
@@ -2115,12 +2240,19 @@ class MainActivity : Activity() {
         }
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply {
+            val lbl = TextView(this@MainActivity).apply {
                 text = label
                 textSize = 13f
                 setTextColor(getColor(R.color.nt_muted))
                 labelFor = f.id
                 setPadding(dp(4), dp(4), 0, dp(6))
+            }
+            if (labelAction == null) addView(lbl)
+            else addView(LinearLayout(this@MainActivity).apply { // ação do campo (ex.: "Colar") na linha do rótulo
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                addView(lbl, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(textAction(labelAction.first, labelAction.second, R.color.nt_green, labelAction.third))
             })
             addView(f, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             if (helper != null) addView(TextView(this@MainActivity).apply {
@@ -2134,6 +2266,51 @@ class MainActivity : Activity() {
         if (loose) content.addLoose(box, matchWrap.apply { topMargin = dp(16) })
         else parent.addView(box, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         return f
+    }
+
+    /**
+     * Chave principal da tela (como o "Usar Wi-Fi" das Configurações): um bloco grande e destacado, verde quando ligado.
+     * Ligada ao rascunho como as outras chaves.
+     */
+    private fun mainSwitch(key: String, label: String) {
+        val sw = Switch(this).apply {
+            isChecked = draft()[key] == "true"
+            isClickable = false
+            isFocusable = false
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        val row = LinearLayout(this).apply {
+            tag = "mainswitch"
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            minimumHeight = dp(72)
+            setPadding(dp(24), dp(12), dp(20), dp(12))
+            isClickable = true
+            isFocusable = true
+            addView(TextView(this@MainActivity).apply {
+                text = label
+                textSize = 18f
+                setTextColor(getColor(R.color.nt_text))
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(sw)
+            accessibilityDelegate = object : View.AccessibilityDelegate() {
+                override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
+                    super.onInitializeAccessibilityNodeInfo(host, info)
+                    info.className = Switch::class.java.name
+                    info.isCheckable = true
+                    info.isChecked = sw.isChecked
+                }
+            }
+        }
+        fun paint() = row.setBackgroundResource(if (sw.isChecked) R.drawable.main_switch_on else R.drawable.main_switch_off)
+        paint()
+        row.setOnClickListener {
+            sw.toggle()
+            draft()[key] = sw.isChecked.toString()
+            paint()
+            refreshSave()
+        }
+        content.addLoose(row, matchWrap.apply { topMargin = dp(4) })
     }
 
     /** Item com interruptor à direita; tocar em qualquer parte da linha liga ou desliga. */
