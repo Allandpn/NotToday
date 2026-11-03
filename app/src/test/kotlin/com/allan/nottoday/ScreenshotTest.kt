@@ -107,7 +107,7 @@ class ScreenshotTest {
         PinStore(ctx).set("246810")
         a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         shot(a, "04-bloqueado")
-        views(a.window.decorView).filterIsInstance<EditText>().first { it.hint == "PIN" }.setText("246810")
+        a.findViewById<EditText>(views(a.window.decorView).filterIsInstance<android.widget.TextView>().first { it.text.toString() == "PIN" && it.labelFor != View.NO_ID }.labelFor).setText("246810")
         button(a, "Entrar").performClick()
         shot(a, "05-configuracoes")
         button(a, "Restrições").performClick()

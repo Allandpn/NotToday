@@ -99,10 +99,9 @@ class UiAuditTest {
                 if (v !is EditText && label.isBlank()) found += "$screen|sem-nome|${v.javaClass.simpleName} ${w}x${h}dp"
             }
             if (v is EditText) {
-                val lbl = v.labelFor
                 val hasVisibleLabel = views(a.window.decorView).any { it is TextView && it !is EditText && it.labelFor == v.id && v.id != View.NO_ID }
                 if (!hasVisibleLabel && v.contentDescription.isNullOrBlank()) found += "$screen|rótulo-só-no-placeholder|campo \"${v.hint ?: ""}\""
-                if (lbl == 0 && v.height / d < 48) found += "$screen|campo<48dp|\"${v.hint ?: ""}\" ${(v.height / d).toInt()}dp"
+                if (v.height / d < 48) found += "$screen|campo<48dp|\"${v.hint ?: ""}\" ${(v.height / d).toInt()}dp"
             }
             if (v is TextView && v !is EditText && v.text.isNotBlank() && v.width > 0) {
                 val txt = v.text.toString().replace("\n", " ").take(40)
@@ -160,7 +159,7 @@ class UiAuditTest {
             PinStore(ctx).set("246810")
             a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
             audit(a, "bloqueado$s")
-            views(a.window.decorView).filterIsInstance<EditText>().first { it.hint == "PIN" }.setText("246810")
+            a.findViewById<EditText>(views(a.window.decorView).filterIsInstance<android.widget.TextView>().first { it.text.toString() == "PIN" && it.labelFor != View.NO_ID }.labelFor).setText("246810")
             tap(a, "Entrar"); audit(a, "configuracoes$s")
             for (sec in listOf("Restrições", "Filtro DNS")) {
                 tap(a, sec); audit(a, "$sec$s")

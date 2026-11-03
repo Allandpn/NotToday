@@ -109,15 +109,17 @@ class MainActivity : Activity() {
                 setTextColor(getColor(R.color.nt_text))
                 setBackgroundResource(R.drawable.btn_secondary)
                 setOnClickListener { draft = null; render() }
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)).apply { marginEnd = dp(8) })
+                minHeight = dp(48); minimumHeight = dp(48)
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) })
             addView(Button(this@MainActivity).apply {
                 text = "Salvar e aplicar"
                 isAllCaps = false
                 setTextColor(getColor(R.color.nt_ink))
                 setBackgroundResource(R.drawable.btn_primary)
                 setPadding(dp(16), 0, dp(16), 0)
+                minHeight = dp(48); minimumHeight = dp(48)
                 setOnClickListener { saveDraft(policy.isDeviceOwner()) }
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
         requestBarView = LinearLayout(this).apply {
             tag = "requestbar"
@@ -131,8 +133,9 @@ class MainActivity : Activity() {
                 textSize = 16f
                 setTextColor(getColor(R.color.nt_ink))
                 setBackgroundResource(R.drawable.btn_primary)
+                minHeight = dp(52); minimumHeight = dp(52)
                 setOnClickListener { sendPicked() }
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)))
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
         undoBarView = LinearLayout(this).apply {
             tag = "undobar"
@@ -162,9 +165,10 @@ class MainActivity : Activity() {
             addView(requestBarView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(saveBarView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
-        // targetSdk 36 desenha edge-to-edge: afastar o conteúdo das barras do sistema.
+        // targetSdk 36 desenha edge-to-edge: afastar o conteúdo das barras do sistema e do teclado (a janela não encolhe
+        // mais sozinha quando ele abre, e a barra fixa de baixo ficaria por trás dele).
         root.setOnApplyWindowInsetsListener { v, insets ->
-            val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars())
+            val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.ime())
             v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
             insets
         }
@@ -245,10 +249,10 @@ class MainActivity : Activity() {
         var delayField: EditText? = null
         if (!changingPin) {
             text("Atraso para qualquer desbloqueio, em horas (0 = sem atraso, só para testes). Padrão: 24.")
-            delayField = EditText(this).apply {
+            delayField = field("Atraso (horas)") {
                 setText((Config.DEFAULT_DELAY_MIN / 60).toString())
                 inputType = InputType.TYPE_CLASS_NUMBER
-            }.also { content.addView(it) }
+            }
         }
         button("Salvar PIN", primary = true) {
             val p = pin.text.toString()
@@ -283,17 +287,11 @@ class MainActivity : Activity() {
     private fun renderPair() {
         title("Parear com Guardian remoto")
         text("No site do Guardian: Guardiões → Parear aparelho. Cole aqui a string gerada (vale 24 h, uso único).")
-        val str = EditText(this).apply {
-            hint = "string de pareamento"
+        val str = field("String de pareamento", "cole aqui o texto copiado do site") {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             minLines = 3
         }
-        content.addView(str, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        val name = EditText(this).apply {
-            hint = "nome deste aparelho"
-            setText(android.os.Build.MODEL ?: "Aparelho")
-        }
-        content.addView(name)
+        val name = field("Nome deste aparelho") { setText(android.os.Build.MODEL ?: "Aparelho") }
         button("Parear", primary = true) {
             val s = str.text.toString()
             val n = name.text.toString()
@@ -818,14 +816,8 @@ class MainActivity : Activity() {
         val kind = Spinner(this).apply {
             adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, kinds.map { it.second })
         }
-        val what = EditText(this).apply {
-            hint = "o que você precisa, e o motivo"
-            setTextColor(getColor(R.color.nt_text))
-            setHintTextColor(getColor(R.color.nt_muted))
-            inputType = InputType.TYPE_CLASS_TEXT
-        }
         box.addView(kind)
-        box.addView(what)
+        val what = field("O que você precisa", "e o motivo", box) { inputType = InputType.TYPE_CLASS_TEXT }
         AlertDialog.Builder(this)
             .setTitle("Pedido manual")
             .setView(box)
@@ -1060,13 +1052,10 @@ class MainActivity : Activity() {
         switchRow(label, draft()[key] == "true", hint).apply { setOnCheckedChangeListener { _, on -> draft()[key] = on.toString(); refreshSave() } }
 
     /** Campo de texto ligado a uma chave do rascunho. `toValue` devolve null quando o texto não serve (fica o valor anterior). */
-    private fun bindField(key: String, shown: String, type: Int, hintText: String? = null, toValue: (String) -> String?): EditText =
-        EditText(this).apply {
+    private fun bindField(key: String, label: String, shown: String, type: Int, hintText: String? = null, toValue: (String) -> String?): EditText =
+        field(label, hintText) {
             setText(shown)
-            hint = hintText
             inputType = type
-            setTextColor(getColor(R.color.nt_text))
-            setHintTextColor(getColor(R.color.nt_muted))
             addTextChangedListener(object : android.text.TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
@@ -1075,7 +1064,6 @@ class MainActivity : Activity() {
                     refreshSave()
                 }
             })
-            content.addView(this)
         }
 
     private fun pkgList(t: String) = t.split(',', ' ').map { it.trim() }.filter { it.isNotEmpty() }.joinToString(",")
@@ -1094,7 +1082,7 @@ class MainActivity : Activity() {
                 )
                 section("Lojas extras")
                 text("Pacotes separados por vírgula, suspensos junto com as lojas acima.")
-                bindField("store_extra", d["store_extra"].orEmpty().replace(",", ", "), InputType.TYPE_CLASS_TEXT) { pkgList(it) }
+                bindField("store_extra", "Pacotes", d["store_extra"].orEmpty().replace(",", ", "), InputType.TYPE_CLASS_TEXT) { pkgList(it) }
             }
             "filtro" -> {
                 text(
@@ -1109,7 +1097,7 @@ class MainActivity : Activity() {
                 )
                 section("Domínio-canário")
                 text("Um domínio REAL (existente) que o seu servidor DNS mantém bloqueado. Sem ele, os apps marcados ficam suspensos.")
-                bindField("canary", d["canary"].orEmpty(), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI, "ex.: canario.exemplo.com") {
+                bindField("canary", "Domínio", d["canary"].orEmpty(), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI, "ex.: canario.exemplo.com") {
                     it.trim().lowercase()
                 }
                 section("Apps no filtro")
@@ -1141,9 +1129,9 @@ class MainActivity : Activity() {
                 button(if (devPins.isSet) "Trocar PIN de desenvolvedor" else "Definir PIN de desenvolvedor") { promptDevPin() }
                 bindSwitch("dev_reboot", "Reiniciar o aparelho ao fim da janela", "Mata processos de shell iniciados durante a janela (estilo Shizuku).")
                 section("Janelas por 24 h")
-                bindField("dev_windows_per_day", d["dev_windows_per_day"].orEmpty(), num) { it.toIntOrNull()?.coerceIn(0, 20)?.toString() }
+                bindField("dev_windows_per_day", "Janelas", d["dev_windows_per_day"].orEmpty(), num) { it.toIntOrNull()?.coerceIn(0, 20)?.toString() }
                 section("Duração de cada janela (segundos)")
-                bindField("dev_window_seconds", d["dev_window_seconds"].orEmpty(), num) { it.toIntOrNull()?.coerceIn(10, 600)?.toString() }
+                bindField("dev_window_seconds", "Segundos", d["dev_window_seconds"].orEmpty(), num) { it.toIntOrNull()?.coerceIn(10, 600)?.toString() }
             }
             "chrome" -> {
                 text("Configuração gerenciada do Chrome. Melhor esforço: confira em chrome://policy. Não vale para outros navegadores.")
@@ -1174,12 +1162,12 @@ class MainActivity : Activity() {
                 bindSwitch("postpone_updates", "Adiar atualizações do Android (até 30 dias)", "Dá tempo de testar o app numa versão nova. Passados 30 dias o sistema instala.")
                 section("Apps protegidos extras")
                 text("Pacotes separados por vírgula (ex.: AppLock). Confira com `pm list packages`.")
-                bindField("protected_pkgs", d["protected_pkgs"].orEmpty().replace(",", ", "), InputType.TYPE_CLASS_TEXT) { pkgList(it) }
+                bindField("protected_pkgs", "Pacotes", d["protected_pkgs"].orEmpty().replace(",", ", "), InputType.TYPE_CLASS_TEXT) { pkgList(it) }
             }
             "seguranca" -> {
                 section("Atraso para desbloqueios (horas)")
                 text("Aumentar vale na hora; diminuir também espera o atraso atual.")
-                bindField(Gate.KEY_DELAY, ((d[Gate.KEY_DELAY]?.toLongOrNull() ?: 0) / 60).toString(), num) {
+                bindField(Gate.KEY_DELAY, "Horas", ((d[Gate.KEY_DELAY]?.toLongOrNull() ?: 0) / 60).toString(), num) {
                     it.toLongOrNull()?.coerceIn(0, 24 * 14)?.let { h -> (h * 60).toString() }
                 }
                 section("PIN")
@@ -1352,13 +1340,8 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(8), dp(16), 0)
         }
-        fun field(h: String) = EditText(this).apply {
-            hint = h
-            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
-            box.addView(this)
-        }
-        val a = field("PIN de desenvolvedor")
-        val b = field("Repita")
+        val a = pinField("PIN de desenvolvedor", box)
+        val b = pinField("Repita o PIN", box)
         AlertDialog.Builder(this)
             .setTitle("PIN de desenvolvedor")
             .setMessage("Mínimo ${PinStore.MIN_LENGTH} dígitos. Diferente do PIN da pessoa de confiança.")
@@ -1626,19 +1609,45 @@ class MainActivity : Activity() {
         )
     }
 
-    private fun pinField(hintText: String) = EditText(this).apply {
-        hint = hintText
-        setTextColor(getColor(R.color.nt_text))
-        setHintTextColor(getColor(R.color.nt_muted))
-        inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
-        content.addView(this, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+    private fun pinField(label: String, parent: ViewGroup = content) =
+        field(label, parent = parent) { inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD }
+
+    /**
+     * Campo de texto com rótulo visível em cima, ligado a ele para o leitor de tela (o texto de exemplo some ao digitar e
+     * não serve de rótulo), e com no mínimo 48dp de altura para o toque.
+     */
+    private fun field(label: String, example: String? = null, parent: ViewGroup = content, setup: EditText.() -> Unit = {}): EditText {
+        val f = EditText(this).apply {
+            id = View.generateViewId()
+            hint = example
+            setTextColor(getColor(R.color.nt_text))
+            setHintTextColor(getColor(R.color.nt_muted))
+            setup()
+            minimumHeight = dp(48) // o da View: o inputType de uma linha troca o minHeight do TextView por minLines
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(TextView(this@MainActivity).apply {
+                text = label
+                textSize = 13f
+                setTextColor(getColor(R.color.nt_muted))
+                labelFor = f.id
+                setPadding(dp(4), dp(4), 0, 0)
+            })
+            addView(f, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+        parent.addView(box, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        return f
     }
 
     /** Item com interruptor à direita; tocar em qualquer parte da linha liga ou desliga. */
     private fun switchRow(label: String, checked: Boolean, hint: String? = null): Switch {
         val sw = Switch(this).apply {
             isChecked = checked
-            contentDescription = label
+            // a linha é o controle: o interruptor só mostra o estado (senão o leitor de tela para duas vezes no mesmo item)
+            isClickable = false
+            isFocusable = false
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
         val row = LinearLayout(this).apply {
             tag = SettingsPage.ROW
@@ -1648,6 +1657,14 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(14), dp(12), dp(14))
             touchable()
             setOnClickListener { sw.toggle() }
+            accessibilityDelegate = object : View.AccessibilityDelegate() {
+                override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
+                    super.onInitializeAccessibilityNodeInfo(host, info)
+                    info.className = Switch::class.java.name
+                    info.isCheckable = true
+                    info.isChecked = sw.isChecked
+                }
+            }
             addView(twoLine(label, hint), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(16) })
             addView(sw)
         }
