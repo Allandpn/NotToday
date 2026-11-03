@@ -62,6 +62,17 @@ class MainActivity : Activity() {
     private val pickedApps = linkedSetOf<String>()
     private val picked = linkedSetOf<String>()
     private val depth = HashMap<String, Int>()  // domínio bloqueado -> quantos rótulos foram tirados antes de pedir
+    // Barra de cima das Liberações (Material 3): título com Atualizar e as ações da aba; com algo marcado vira o modo de
+    // seleção ("2 selecionados", X para desmarcar). As abas dizem quais ações têm em headerActions e selectRecent.
+    private var blockedHeader: LinearLayout? = null
+    private var headerActions: List<Triple<Int, String, () -> Unit>> = emptyList()
+    private var selectRecent: (() -> Unit)? = null
+    private val requestButton by lazy { Button(this) }
+    // "Lista limpa · Desfazer" por alguns segundos, como o snackbar do Material: limpar não pede confirmação, mas dá para voltar.
+    private lateinit var undoBarView: LinearLayout
+    private val undoLabel by lazy { TextView(this) }
+    private var undoAction: (() -> Unit)? = null
+    private val undoHide = Runnable { undoBarView.visibility = View.GONE; undoAction = null }
     private var page: String? = null                 // subtela das configurações (null = início)
     private var draft: MutableMap<String, String>? = null  // alterações ainda não salvas
     private lateinit var saveBarView: LinearLayout
@@ -110,33 +121,44 @@ class MainActivity : Activity() {
         }
         requestBarView = LinearLayout(this).apply {
             tag = "requestbar"
+            setBackgroundColor(getColor(R.color.nt_surface2))
+            visibility = View.GONE
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(10), dp(16), dp(12))
+            addView(requestLabel.apply { textSize = 13f; setTextColor(getColor(R.color.nt_muted)); setPadding(dp(4), 0, 0, dp(6)) })
+            addView(requestButton.apply {
+                isAllCaps = false
+                textSize = 16f
+                setTextColor(getColor(R.color.nt_ink))
+                setBackgroundResource(R.drawable.btn_primary)
+                setOnClickListener { sendPicked() }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)))
+        }
+        undoBarView = LinearLayout(this).apply {
+            tag = "undobar"
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
             setBackgroundColor(getColor(R.color.nt_surface2))
-            setPadding(dp(20), dp(10), dp(12), dp(10))
+            setPadding(dp(20), dp(6), dp(8), dp(6))
             visibility = View.GONE
-            addView(requestLabel.apply { textSize = 15f; setTextColor(getColor(R.color.nt_text)) },
+            addView(undoLabel.apply { textSize = 15f; setTextColor(getColor(R.color.nt_text)) },
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(Button(this@MainActivity).apply {
-                text = "Limpar"
+                text = "Desfazer"
                 isAllCaps = false
-                setTextColor(getColor(R.color.nt_text))
-                setBackgroundResource(R.drawable.btn_secondary)
-                setOnClickListener { picked.clear(); pickedApps.clear(); render() }
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)).apply { marginEnd = dp(8) })
-            addView(Button(this@MainActivity).apply {
-                text = "Pedir liberação"
-                isAllCaps = false
-                setTextColor(getColor(R.color.nt_ink))
-                setBackgroundResource(R.drawable.btn_primary)
-                setPadding(dp(16), 0, dp(16), 0)
-                setOnClickListener { sendPicked() }
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
+                textSize = 15f
+                setTextColor(getColor(R.color.nt_green))
+                val tv = android.util.TypedValue()
+                theme.resolveAttribute(android.R.attr.selectableItemBackground, tv, true)
+                setBackgroundResource(tv.resourceId)
+                setOnClickListener { val u = undoAction; undoHide.run(); u?.invoke() }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(48)))
         }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(getColor(R.color.nt_bg))
             addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(undoBarView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(requestBarView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(saveBarView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
@@ -162,6 +184,8 @@ class MainActivity : Activity() {
     override fun onStop() {
         super.onStop()
         stopCountdown()
+        undoBarView.removeCallbacks(undoHide)
+        undoHide.run()
         unlocked = false
         showBlocked = false
         page = null
@@ -175,6 +199,9 @@ class MainActivity : Activity() {
         content.removeAllViews()
         (content.parent as? ScrollView)?.scrollTo(0, 0)
         barMode = null
+        blockedHeader = null
+        headerActions = emptyList()
+        selectRecent = null
         syncBack()
         try {
             val owner = policy.isDeviceOwner()
@@ -410,7 +437,14 @@ class MainActivity : Activity() {
     }
 
     private fun renderBlocked() {
-        subTitle("Liberações") { blockedData = null; blockedError = null; render(); loadBlocked() }
+        blockedHeader = LinearLayout(this).apply {
+            tag = "blockedheader"
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            minimumHeight = dp(64)
+            setPadding(0, dp(28), dp(4), dp(12))
+        }
+        content.addLoose(blockedHeader!!, matchWrap)
         val api = unblockApi()
         val d = blockedData
         val open = d?.requests?.count { it.status == "open" } ?: 0
@@ -551,8 +585,20 @@ class MainActivity : Activity() {
         val fresh = Cleared.blocked(d.items, remote.blockedClearedAt).filter { it.domain !in openDomains && it.domain != canary }
         picked.retainAll(fresh.map { it.domain }.toSet())
 
-        section("O que aparece aqui")
-        text("Itens sem caixa de marcar não podem ser pedidos por aqui. Se achar que é um erro, fale com o guardião.")
+        if (fresh.isNotEmpty()) {
+            headerActions = listOf(Triple(R.drawable.ic_delete_sweep, "Limpar lista") {
+                val before = remote.blockedClearedAt
+                remote.blockedClearedAt = Cleared.newestSeen(d.items, remote.blockedClearedAt)
+                picked.clear()
+                render()
+                showUndo("Lista limpa") { remote.blockedClearedAt = before; render() }
+            })
+        }
+        if (fresh.any { it.own }) selectRecent = {
+            picked.clear()
+            picked.addAll(fresh.filter { it.own }.take(MAX_ASK).map { it.domain })
+            render()
+        }
         if (fresh.isEmpty()) {
             section("Bloqueado")
             text("Nada bloqueado nas últimas 24 horas. Tente abrir o site de novo e volte aqui.")
@@ -573,18 +619,8 @@ class MainActivity : Activity() {
                 section("Antes · últimas 24 h")
                 older.forEach { b -> siteRow(b, summary(b)) }
             }
-            section("Lista")
-            button("Selecionar os mais recentes", summary = "Até $MAX_ASK de uma vez") {
-                picked.clear()
-                picked.addAll(fresh.filter { it.own }.take(MAX_ASK).map { it.domain })
-                render()
-            }
-            button("Esconder desta lista", summary = "Só tira daqui o que já apareceu. O guardião continua vendo o registro dele.") {
-                remote.blockedClearedAt = Cleared.newestSeen(d.items, remote.blockedClearedAt)
-                picked.clear()
-                toast("Lista limpa")
-                render()
-            }
+            if (fresh.any { !it.own }) note("Itens sem caixa de marcar não podem ser pedidos por aqui. Se achar que é um erro, fale com o guardião.")
+            note("Limpar a lista só tira daqui o que já apareceu. O guardião continua vendo o registro dele.")
         }
         section("Outro assunto")
         button("Pedir um app ou outro assunto…", summary = "Texto livre, para o que o filtro não mostra") { manualDialog() }
@@ -648,11 +684,12 @@ class MainActivity : Activity() {
             answered.forEach { r ->
                 r.items.forEach { content.addView(rowOf(it.domain, UnblockText.stateLabel(it), if (it.state == "denied") R.color.nt_orange else R.color.nt_text)) }
             }
-            section("Histórico")
-            button("Limpar os respondidos", summary = "Só some daqui. O guardião continua vendo o registro dele.") {
+            headerActions = listOf(Triple(R.drawable.ic_delete_sweep, "Limpar os respondidos") {
+                val before = remote.requestsClearedId
                 remote.requestsClearedId = Cleared.newestAnswered(d.requests, remote.requestsClearedId)
                 render()
-            }
+                showUndo("Respondidos limpos") { remote.requestsClearedId = before; render() }
+            })
         }
     }
 
@@ -673,8 +710,66 @@ class MainActivity : Activity() {
             else -> 0
         }
         requestBarView.visibility = if (showBlocked && n > 0) View.VISIBLE else View.GONE
-        requestLabel.text = "$n marcado${if (n > 1) "s" else ""}" + if (n > MAX_ASK) "\nvão só os $MAX_ASK primeiros" else ""
+        requestButton.text = "Pedir liberação · $n"
+        requestLabel.text = if (n > MAX_ASK) "Vão só os $MAX_ASK primeiros" else ""
+        requestLabel.visibility = if (n > MAX_ASK) View.VISIBLE else View.GONE
+        drawBlockedHeader(n)
     }
+
+    /** Barra de cima das Liberações: normal (voltar, título, atualizar e as ações da aba) ou seleção (X, "N selecionados"). */
+    private fun drawBlockedHeader(n: Int) {
+        val hdr = blockedHeader ?: return
+        hdr.removeAllViews()
+        fun label(s: String, size: Float) = TextView(this).apply {
+            text = s
+            textSize = size
+            setTextColor(getColor(R.color.nt_text))
+            setPadding(dp(8), 0, 0, 0)
+        }
+        val weight = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        if (n > 0) {
+            hdr.addView(iconButton(R.drawable.ic_close, "Desmarcar tudo") { picked.clear(); pickedApps.clear(); render() })
+            hdr.addView(label("$n selecionado${if (n > 1) "s" else ""}", 22f), weight)
+            if (barMode == "sites") selectRecent?.let { hdr.addView(iconButton(R.drawable.ic_select_all, "Selecionar os mais recentes (até $MAX_ASK)", it)) }
+        } else {
+            hdr.addView(iconButton(R.drawable.ic_back, "Voltar") { goBack() })
+            hdr.addView(label("Liberações", 28f), weight)
+            hdr.addView(iconButton(R.drawable.ic_refresh, "Atualizar") { blockedData = null; blockedError = null; render(); loadBlocked() })
+            headerActions.forEach { (icon, desc, f) -> hdr.addView(iconButton(icon, desc, f)) }
+        }
+    }
+
+    /** Ação de barra de cima: só o ícone (48 dp), com a descrição para o leitor de tela e ao tocar e segurar. */
+    private fun iconButton(icon: Int, desc: String, onClick: () -> Unit) = android.widget.ImageButton(this).apply {
+        setImageResource(icon)
+        contentDescription = desc
+        tooltipText = desc
+        val tv = android.util.TypedValue()
+        theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true)
+        setBackgroundResource(tv.resourceId)
+        setOnClickListener { onClick() }
+        layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
+    }
+
+    private fun showUndo(label: String, undo: () -> Unit) {
+        undoLabel.text = label
+        undoAction = undo
+        undoBarView.visibility = View.VISIBLE
+        undoBarView.removeCallbacks(undoHide)
+        undoBarView.postDelayed(undoHide, 6000)
+    }
+
+    /** Nota de rodapé, fora dos grupos, no tom secundário. */
+    private fun note(s: String) = content.addLoose(
+        TextView(this).apply {
+            text = s
+            textSize = 13f
+            setLineSpacing(0f, 1.15f)
+            setTextColor(getColor(R.color.nt_muted))
+            setPadding(dp(16), dp(12), dp(16), 0)
+        },
+        matchWrap,
+    )
 
     private fun sendPicked() {
         val api = unblockApi()?.first ?: return
@@ -1138,6 +1233,7 @@ class MainActivity : Activity() {
     private fun goBack() {
         when {
             page != null -> page = null
+            showBlocked && (picked.isNotEmpty() || pickedApps.isNotEmpty()) -> { picked.clear(); pickedApps.clear() }  // como no Gmail: sai da seleção
             showBlocked -> showBlocked = false
             pairing -> pairing = false
             else -> return
