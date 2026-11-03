@@ -56,7 +56,7 @@ class ScreenshotTest {
         val w = scroll.width.coerceAtLeast(1)
         child.measure(View.MeasureSpec.makeMeasureSpec(w - scroll.paddingLeft - scroll.paddingRight, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
-        val bar = views(a.window.decorView).firstOrNull { (it.tag == "savebar" || it.tag == "requestbar") && it.visibility == View.VISIBLE }
+        val bar = views(a.window.decorView).firstOrNull { (it.tag == "savebar" || it.tag == "requestbar" || it.tag == "undobar") && it.visibility == View.VISIBLE }
         bar?.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
         val barH = bar?.measuredHeight ?: 0
         val h = (child.measuredHeight + scroll.paddingTop + scroll.paddingBottom).coerceAtLeast(scroll.height) + barH
@@ -131,8 +131,10 @@ class ScreenshotTest {
         )
         PinStore(ctx).set("246810")
         a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
-        a.debugShowBlocked(items, reqs, "domains", setOf("cdn.video.exemplo.com", "api.video.exemplo.com"))
+        a.debugShowBlocked(items, reqs, "domains")
         shot(a, "08-liberacoes-sites")
+        a.debugShowBlocked(items, reqs, "domains", setOf("cdn.video.exemplo.com", "api.video.exemplo.com"))
+        shot(a, "08b-liberacoes-sites-selecao")
         a.debugShowBlocked(items, reqs, "requests")
         shot(a, "09-liberacoes-pedidos")
         a.debugShowBlocked(items, emptyList(), "apps")
